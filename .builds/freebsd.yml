@@ -1,0 +1,20 @@
+image: freebsd/latest
+packages:
+  - devel/cmake
+  - devel/pkgconf
+  - lang/python3
+  - print/freetype2
+  - x11-fonts/fontconfig
+  - x11-fonts/dejavu
+sources:
+  - https://github.com/alacritty/crossfont
+tasks:
+  - rustup: |
+      curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable --profile minimal
+  - 1-41-0: |
+      $HOME/.cargo/bin/rustup toolchain install --profile minimal 1.41.0
+      cd alacritty
+      $HOME/.cargo/bin/cargo +1.41.0 test
+  - stable: |
+      cd alacritty
+      $HOME/.cargo/bin/cargo +stable test
