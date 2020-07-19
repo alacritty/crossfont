@@ -2,7 +2,6 @@ image: freebsd/latest
 packages:
   - devel/cmake
   - devel/pkgconf
-  - lang/python3
   - print/freetype2
   - x11-fonts/fontconfig
   - x11-fonts/dejavu
@@ -11,10 +10,11 @@ sources:
 tasks:
   - rustup: |
       curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable --profile minimal
-  - 1-41-0: |
-      $HOME/.cargo/bin/rustup toolchain install --profile minimal 1.41.0
-      cd crossfont
-      $HOME/.cargo/bin/cargo +1.41.0 test
   - stable: |
       cd crossfont
       $HOME/.cargo/bin/cargo +stable test
+  - 1-41-0: |
+      $HOME/.cargo/bin/rustup toolchain install --profile minimal 1.41.0
+      cd crossfont
+      rm Cargo.lock
+      $HOME/.cargo/bin/cargo +1.41.0 test
