@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::ffi::OsString;
 use std::fmt::{self, Display, Formatter};
 use std::os::windows::ffi::OsStringExt;
@@ -16,7 +17,8 @@ use winapi::um::dwrite;
 use winapi::um::winnls::GetUserDefaultLocaleName;
 
 use super::{
-    BitmapBuffer, FontDesc, FontKey, GlyphKey, Metrics, RasterizedGlyph, Size, Slant, Style, Weight,
+    BitmapBuffer, FontDesc, FontKey, GlyphKey, KeyType, Metrics, RasterizedGlyph, Size, Slant,
+    Style, Weight,
 };
 
 /// Cached DirectWrite font.
@@ -41,9 +43,9 @@ impl DirectWriteRasterizer {
         &self,
         face: &FontFace,
         size: Size,
-        c: char,
+        glyph: GlyphKey,
     ) -> Result<RasterizedGlyph, Error> {
-        let glyph_index = self.get_glyph_index(face, c)?;
+        let glyph_index = self.get_glyph_index(face, glyph)?;
 
         let em_size = em_size(size);
 
@@ -84,7 +86,7 @@ impl DirectWriteRasterizer {
             .map_err(Error::DirectWriteError)?;
 
         Ok(RasterizedGlyph {
-            c,
+            c: glyph.id,
             width: (bounds.right - bounds.left) as i32,
             height: (bounds.bottom - bounds.top) as i32,
             top: -bounds.top,
@@ -97,15 +99,23 @@ impl DirectWriteRasterizer {
         self.fonts.get(&font_key).ok_or(Error::FontNotLoaded)
     }
 
-    fn get_glyph_index(&self, face: &FontFace, c: char) -> Result<u16, Error> {
+    #[inline]
+    fn get_char_index(&self, face: &FontFace, c: char) -> Result<u16, Error> {
         let idx = *face
             .get_glyph_indices(&[c as u32])
             .first()
             // DirectWrite returns 0 if the glyph does not exist in the font.
             .filter(|glyph_index| **glyph_index != 0)
             .ok_or_else(|| Error::MissingGlyph(c))?;
-
         Ok(idx)
+    }
+
+    fn get_glyph_index(&self, face: &FontFace, glyph: GlyphKey) -> Result<u16, Error> {
+        match glyph.id {
+            KeyType::GlyphIndex(i) => Ok(i.try_into().unwrap()),
+            KeyType::Placeholder => self.get_char_index(face, ' '),
+            KeyType::Char(c) => self.get_char_index(face, c),
+        }
     }
 
     fn get_fallback_font(&self, loaded_font: &Font, c: char) -> Option<dwrote::Font> {
@@ -143,7 +153,11 @@ impl DirectWriteRasterizer {
 impl crate::Rasterize for DirectWriteRasterizer {
     type Err = Error;
 
-    fn new(device_pixel_ratio: f32, _: bool) -> Result<DirectWriteRasterizer, Error> {
+    fn new(
+        device_pixel_ratio: f32,
+        _: bool,
+        _ligatures: bool,
+    ) -> Result<DirectWriteRasterizer, Error> {
         Ok(DirectWriteRasterizer {
             fonts: HashMap::new(),
             keys: HashMap::new(),
@@ -173,7 +187,7 @@ impl crate::Rasterize for DirectWriteRasterizer {
 
         // Since all monospace characters have the same width, we use `!` for horizontal metrics.
         let c = '!';
-        let glyph_index = self.get_glyph_index(face, c)?;
+        let glyph_index = self.get_char_index(face, c)?;
 
         let glyph_metrics = face.get_design_glyph_metrics(&[glyph_index], false);
         let hmetrics = glyph_metrics.first().ok_or_else(|| Error::MissingGlyph(c))?;
@@ -238,10 +252,11 @@ impl crate::Rasterize for DirectWriteRasterizer {
     fn get_glyph(&mut self, glyph: GlyphKey) -> Result<RasterizedGlyph, Error> {
         let loaded_font = self.get_loaded_font(glyph.font_key)?;
 
-        match self.rasterize_glyph(&loaded_font.face, glyph.size, glyph.c) {
-            Err(err @ Error::MissingGlyph(_)) => {
-                let fallback_font = self.get_fallback_font(&loaded_font, glyph.c).ok_or(err)?;
-                self.rasterize_glyph(&fallback_font.create_font_face(), glyph.size, glyph.c)
+        match self.rasterize_glyph(&loaded_font.face, glyph.size, glyph) {
+            Err(Error::MissingGlyph(c)) => {
+                let fallback_font =
+                    self.get_fallback_font(&loaded_font, c).ok_or(Error::MissingGlyph(c))?;
+                self.rasterize_glyph(&fallback_font.create_font_face(), glyph.size, glyph)
             },
             result => result,
         }

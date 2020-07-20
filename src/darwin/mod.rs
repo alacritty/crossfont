@@ -36,7 +36,8 @@ pub mod byte_order;
 use byte_order::kCGBitmapByteOrder32Host;
 
 use super::{
-    BitmapBuffer, FontDesc, FontKey, GlyphKey, Metrics, RasterizedGlyph, Size, Slant, Style, Weight,
+    BitmapBuffer, FontDesc, FontKey, GlyphKey, KeyType, Metrics, RasterizedGlyph, Size, Slant,
+    Style, Weight,
 };
 
 /// Font descriptor.
@@ -80,7 +81,7 @@ pub struct Rasterizer {
 #[derive(Debug)]
 pub enum Error {
     /// Tried to rasterize a glyph but it was not available.
-    MissingGlyph(char),
+    MissingGlyph(KeyType),
 
     /// Couldn't find font matching description.
     MissingFont(FontDesc),
@@ -112,7 +113,11 @@ impl ::std::fmt::Display for Error {
 impl crate::Rasterize for Rasterizer {
     type Err = Error;
 
-    fn new(device_pixel_ratio: f32, use_thin_strokes: bool) -> Result<Rasterizer, Error> {
+    fn new(
+        device_pixel_ratio: f32,
+        use_thin_strokes: bool,
+        _ligatures: bool,
+    ) -> Result<Rasterizer, Error> {
         Ok(Rasterizer {
             fonts: HashMap::new(),
             keys: HashMap::new(),
@@ -156,7 +161,7 @@ impl crate::Rasterize for Rasterizer {
                 }
             }
             // No fallback, give up.
-            Err(Error::MissingGlyph(glyph.c))
+            Err(Error::MissingGlyph(glyph.id))
         })
     }
 
@@ -230,7 +235,7 @@ impl Rasterizer {
         font: &Font,
     ) -> Option<Result<RasterizedGlyph, Error>> {
         let scaled_size = self.device_pixel_ratio * glyph.size.as_f32_pts();
-        font.get_glyph(glyph.c, f64::from(scaled_size), self.use_thin_strokes)
+        font.get_glyph(glyph.id, f64::from(scaled_size), self.use_thin_strokes)
             .map(|r| Some(Ok(r)))
             .unwrap_or_else(|e| match e {
                 Error::MissingGlyph(_) => None,
@@ -460,12 +465,18 @@ impl Font {
 
     pub fn get_glyph(
         &self,
-        character: char,
+        key_type: KeyType,
         _size: f64,
         use_thin_strokes: bool,
     ) -> Result<RasterizedGlyph, Error> {
-        let glyph_index =
-            self.glyph_index(character).ok_or_else(|| Error::MissingGlyph(character))?;
+        let glyph_index = match key_type {
+            KeyType::GlyphIndex(i) => i,
+            KeyType::Char(c) => self.glyph_index(c).ok_or_else(|| Error::MissingGlyph(c.into()))?,
+            KeyType::Placeholder => {
+                // Eary return with an empty buffer for placeholder glyph
+                return Ok(Default::default());
+            },
+        };
 
         let bounds = self.bounding_rect_for_glyph(Default::default(), glyph_index);
 
@@ -477,14 +488,7 @@ impl Font {
         let rasterized_height = (rasterized_descent + rasterized_ascent) as u32;
 
         if rasterized_width == 0 || rasterized_height == 0 {
-            return Ok(RasterizedGlyph {
-                c: ' ',
-                width: 0,
-                height: 0,
-                top: 0,
-                left: 0,
-                buf: BitmapBuffer::RGB(Vec::new()),
-            });
+            return Ok(Default::default());
         }
 
         let mut cg_context = CGContext::create_bitmap_context(
@@ -543,7 +547,7 @@ impl Font {
         };
 
         Ok(RasterizedGlyph {
-            c: character,
+            c: key_type,
             left: rasterized_left,
             top: (bounds.size.height + bounds.origin.y).ceil() as i32,
             width: rasterized_width as i32,
@@ -605,7 +609,7 @@ mod tests {
         for font in fonts {
             // Get a glyph.
             for c in &['a', 'b', 'c', 'd'] {
-                let glyph = font.get_glyph(*c, 72., false).unwrap();
+                let glyph = font.get_glyph((*c).into(), 72., false).unwrap();
 
                 let buf = match &glyph.buf {
                     BitmapBuffer::RGB(buf) => buf,
