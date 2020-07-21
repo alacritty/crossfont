@@ -23,11 +23,11 @@ freetype-rs = "0.26"
 harfbuzz_rs = { version = "1.1.2", default-features = false, features = ["build-native-harfbuzz"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-cocoa = "0.20.1"
-core-foundation = "0.7"
-core-text = "15"
-core-graphics = "0.19"
-core-foundation-sys = "0.7"
+cocoa = "0.23.0"
+core-foundation = "0.9"
+core-text = "19"
+core-graphics = "0.22"
+core-foundation-sys = "0.8"
 
 [target.'cfg(windows)'.dependencies]
 dwrote = { version = "0.11" }

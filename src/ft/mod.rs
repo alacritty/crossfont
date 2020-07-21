@@ -9,7 +9,7 @@ use freetype::face::LoadFlag;
 use freetype::tt_os2::TrueTypeOS2Table;
 use freetype::{self, Library, Matrix};
 use freetype::{freetype_sys, Face as FTFace};
-use harfbuzz_rs::{Face as HbFace, Feature, Font, GlyphBuffer, Owned, UnicodeBuffer};
+use harfbuzz_rs::{Face as HbFace, Feature, Font, Owned, UnicodeBuffer};
 use libc::{c_long, c_uint};
 use log::{debug, trace};
 
@@ -18,8 +18,8 @@ pub mod fc;
 use fc::{CharSet, FTFaceLocation, Pattern, PatternHash, PatternRef};
 
 use super::{
-    BitmapBuffer, FontDesc, FontKey, GlyphKey, KeyType, Metrics, Rasterize, RasterizedGlyph, Size,
-    Slant, Style, Weight,
+    BitmapBuffer, FontDesc, FontKey, GlyphKey, Info, KeyType, Metrics, Rasterize, RasterizeExt,
+    RasterizedGlyph, Size, Slant, Style, Weight,
 };
 
 struct FallbackFont {
@@ -181,11 +181,16 @@ impl Rasterize for FreeTypeRasterizer {
     }
 }
 
-impl crate::HbFtExt for FreeTypeRasterizer {
-    fn shape(&mut self, text: &str, font_key: FontKey) -> GlyphBuffer {
+impl RasterizeExt for FreeTypeRasterizer {
+    fn shape(&mut self, text: &str, font_key: FontKey) -> Vec<Info> {
         let font_prop = self.faces.get(&font_key).unwrap();
         let buf = UnicodeBuffer::new().add_str(text);
-        harfbuzz_rs::shape(&font_prop.hb_font, buf, &self.features)
+        let buffer = harfbuzz_rs::shape(&font_prop.hb_font, buf, &self.features);
+        buffer
+            .get_glyph_infos()
+            .iter()
+            .map(|info| Info { codepoint: info.codepoint, cluster: info.cluster })
+            .collect()
     }
 }
 

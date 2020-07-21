@@ -6,6 +6,10 @@ use std::path::PathBuf;
 use std::ptr;
 
 use core_foundation::array::{CFArray, CFIndex};
+use core_foundation::attributed_string::CFAttributedStringCreate;
+use core_foundation::base::{kCFAllocatorDefault, TCFType};
+use core_foundation::dictionary::CFDictionary;
+use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_graphics::base::kCGImageAlphaPremultipliedFirst;
 use core_graphics::color_space::CGColorSpace;
@@ -24,6 +28,8 @@ use core_text::font_descriptor::kCTFontHorizontalOrientation;
 use core_text::font_descriptor::kCTFontVerticalOrientation;
 use core_text::font_descriptor::SymbolicTraitAccessors;
 use core_text::font_descriptor::{CTFontDescriptor, CTFontOrientation};
+use core_text::line::CTLine;
+use core_text::string_attributes::*;
 
 use cocoa::base::{id, nil, NO};
 use cocoa::foundation::{NSOperatingSystemVersion, NSProcessInfo, NSString, NSUserDefaults};
@@ -36,8 +42,8 @@ pub mod byte_order;
 use byte_order::kCGBitmapByteOrder32Host;
 
 use super::{
-    BitmapBuffer, FontDesc, FontKey, GlyphKey, KeyType, Metrics, RasterizedGlyph, Size, Slant,
-    Style, Weight,
+    BitmapBuffer, FontDesc, FontKey, GlyphKey, Info, KeyType, Metrics, Rasterize, RasterizeExt,
+    RasterizedGlyph, Size, Slant, Style, Weight,
 };
 
 /// Font descriptor.
@@ -110,7 +116,38 @@ impl ::std::fmt::Display for Error {
     }
 }
 
-impl crate::Rasterize for Rasterizer {
+impl RasterizeExt for Rasterizer {
+    fn shape(&mut self, text: &str, font_key: FontKey) -> Vec<Info> {
+        let font = self.fonts.get(&font_key).unwrap();
+        let dic_imm: CFDictionary<CFString, _> = unsafe {
+            CFDictionary::from_CFType_pairs(&[
+                (TCFType::wrap_under_get_rule(kCTLigatureAttributeName), CFNumber::from(2).as_CFType()),
+                (TCFType::wrap_under_get_rule(kCTFontAttributeName), font.ct_font.as_CFType()),
+            ])
+        };
+        let line = unsafe {
+            let astr_ref = CFAttributedStringCreate(
+                kCFAllocatorDefault,
+                CFString::new(text).as_concrete_TypeRef(),
+                dic_imm.into_untyped().as_concrete_TypeRef(),
+            );
+            CTLine::new_with_attributed_string(astr_ref)
+        };
+        line.glyph_runs()
+            .iter()
+            .flat_map(|r| {
+                r.glyphs().iter().zip(r.string_indices().iter()).map(
+                    |(codepoint, cluster)| Info {
+                        codepoint: *codepoint as u32,
+                        cluster: *cluster as u32,
+                    },
+                ).collect::<Vec<_>>()
+            })
+            .collect()
+    }
+}
+
+impl Rasterize for Rasterizer {
     type Err = Error;
 
     fn new(

@@ -274,9 +274,14 @@ pub trait Rasterize {
     fn update_dpr(&mut self, device_pixel_ratio: f32);
 }
 
+pub struct Info {
+    pub codepoint: u32,
+    pub cluster: u32,
+}
+
 /// Extends the Rasterizer with Harfbuzz specific functionality.
-#[cfg(not(any(target_os = "macos", windows)))]
-pub trait HbFtExt {
+#[cfg(not(windows))]
+pub trait RasterizeExt {
     /// Shape the provided text into a set of glyphs.
-    fn shape(&mut self, text: &str, font_key: FontKey) -> harfbuzz_rs::GlyphBuffer;
+    fn shape(&mut self, text: &str, font_key: FontKey) -> Vec<Info>;
 }
