@@ -55,6 +55,7 @@ struct FaceLoadingProperties {
     matrix: Option<Matrix>,
     pixelsize_fixup_factor: Option<f64>,
     ft_face: Rc<FTFace>,
+    rgba: fc::Rgba,
 }
 
 impl fmt::Debug for FaceLoadingProperties {
@@ -347,6 +348,8 @@ impl FreeTypeRasterizer {
 
             let pixelsize_fixup_factor = pattern.pixelsizefixupfactor().next();
 
+            let rgba = pattern.rgba().next().unwrap_or(fc::Rgba::Unknown);
+
             let face = FaceLoadingProperties {
                 load_flags: Self::ft_load_flags(pattern),
                 render_mode: Self::ft_render_mode(pattern),
@@ -357,6 +360,7 @@ impl FreeTypeRasterizer {
                 matrix,
                 pixelsize_fixup_factor,
                 ft_face,
+                rgba,
             };
 
             debug!("Loaded Face {:?}", face);
@@ -465,7 +469,7 @@ impl FreeTypeRasterizer {
 
         glyph.render_glyph(face.render_mode)?;
 
-        let (pixel_height, pixel_width, buf) = Self::normalize_buffer(&glyph.bitmap())?;
+        let (pixel_height, pixel_width, buf) = Self::normalize_buffer(&glyph.bitmap(), &face.rgba)?;
 
         let rasterized_glyph = RasterizedGlyph {
             c: glyph_key.c,
@@ -582,6 +586,7 @@ impl FreeTypeRasterizer {
     /// The i32 value in the return type is the number of pixels per row.
     fn normalize_buffer(
         bitmap: &freetype::bitmap::Bitmap,
+        rgba: &fc::Rgba,
     ) -> freetype::FtResult<(i32, i32, BitmapBuffer)> {
         use freetype::bitmap::PixelMode;
 
@@ -593,7 +598,16 @@ impl FreeTypeRasterizer {
                 for i in 0..bitmap.rows() {
                     let start = (i as usize) * pitch;
                     let stop = start + bitmap.width() as usize;
-                    packed.extend_from_slice(&buf[start..stop]);
+                    match rgba {
+                        fc::Rgba::Bgr => {
+                            for j in (start..stop).step_by(3) {
+                                packed.push(buf[j + 2]);
+                                packed.push(buf[j + 1]);
+                                packed.push(buf[j]);
+                            }
+                        },
+                        _ => packed.extend_from_slice(&buf[start..stop]),
+                    }
                 }
                 Ok((bitmap.rows(), bitmap.width() / 3, BitmapBuffer::RGB(packed)))
             },
@@ -601,6 +615,10 @@ impl FreeTypeRasterizer {
                 for i in 0..bitmap.rows() / 3 {
                     for j in 0..bitmap.width() {
                         for k in 0..3 {
+                            let k = match rgba {
+                                fc::Rgba::Vbgr => 2 - k,
+                                _ => k,
+                            };
                             let offset = ((i as usize) * 3 + k) * pitch + (j as usize);
                             packed.push(buf[offset]);
                         }
