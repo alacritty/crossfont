@@ -14,7 +14,7 @@ use log::{debug, trace};
 
 pub mod fc;
 
-use fc::{CharSet, FTFaceLocation, Pattern, PatternHash, PatternRef};
+use fc::{CharSet, FTFaceLocation, Pattern, PatternHash, PatternRef, Rgba};
 
 use super::{
     BitmapBuffer, FontDesc, FontKey, GlyphKey, Metrics, Rasterize, RasterizedGlyph, Size, Slant,
@@ -55,6 +55,7 @@ struct FaceLoadingProperties {
     matrix: Option<Matrix>,
     pixelsize_fixup_factor: Option<f64>,
     ft_face: Rc<FTFace>,
+    rgba: Rgba,
 }
 
 impl fmt::Debug for FaceLoadingProperties {
@@ -347,6 +348,8 @@ impl FreeTypeRasterizer {
 
             let pixelsize_fixup_factor = pattern.pixelsizefixupfactor().next();
 
+            let rgba = pattern.rgba().next().unwrap_or(Rgba::Unknown);
+
             let face = FaceLoadingProperties {
                 load_flags: Self::ft_load_flags(pattern),
                 render_mode: Self::ft_render_mode(pattern),
@@ -357,6 +360,7 @@ impl FreeTypeRasterizer {
                 matrix,
                 pixelsize_fixup_factor,
                 ft_face,
+                rgba,
             };
 
             debug!("Loaded Face {:?}", face);
@@ -465,7 +469,7 @@ impl FreeTypeRasterizer {
 
         glyph.render_glyph(face.render_mode)?;
 
-        let (pixel_height, pixel_width, buf) = Self::normalize_buffer(&glyph.bitmap())?;
+        let (pixel_height, pixel_width, buf) = Self::normalize_buffer(&glyph.bitmap(), &face.rgba)?;
 
         let rasterized_glyph = RasterizedGlyph {
             c: glyph_key.c,
@@ -494,7 +498,7 @@ impl FreeTypeRasterizer {
         let antialias = pattern.antialias().next().unwrap_or(true);
         let autohint = pattern.autohint().next().unwrap_or(false);
         let hinting = pattern.hinting().next().unwrap_or(true);
-        let rgba = pattern.rgba().next().unwrap_or(fc::Rgba::Unknown);
+        let rgba = pattern.rgba().next().unwrap_or(Rgba::Unknown);
         let embedded_bitmaps = pattern.embeddedbitmap().next().unwrap_or(true);
         let scalable = pattern.scalable().next().unwrap_or(true);
         let color = pattern.color().next().unwrap_or(false);
@@ -528,13 +532,15 @@ impl FreeTypeRasterizer {
             (true, fc::HintStyle::Medium, _) => LoadFlag::TARGET_NORMAL,
             // If LCD hinting is to be used, must select hintmedium or hintfull,
             // have AA enabled, and select a subpixel mode.
-            (true, fc::HintStyle::Full, fc::Rgba::Rgb)
-            | (true, fc::HintStyle::Full, fc::Rgba::Bgr) => LoadFlag::TARGET_LCD,
-            (true, fc::HintStyle::Full, fc::Rgba::Vrgb)
-            | (true, fc::HintStyle::Full, fc::Rgba::Vbgr) => LoadFlag::TARGET_LCD_V,
+            (true, fc::HintStyle::Full, Rgba::Rgb) | (true, fc::HintStyle::Full, Rgba::Bgr) => {
+                LoadFlag::TARGET_LCD
+            },
+            (true, fc::HintStyle::Full, Rgba::Vrgb) | (true, fc::HintStyle::Full, Rgba::Vbgr) => {
+                LoadFlag::TARGET_LCD_V
+            },
             // For non-rgba modes with Full hinting, just use the default hinting algorithm.
-            (true, fc::HintStyle::Full, fc::Rgba::Unknown)
-            | (true, fc::HintStyle::Full, fc::Rgba::None) => LoadFlag::TARGET_NORMAL,
+            (true, fc::HintStyle::Full, Rgba::Unknown)
+            | (true, fc::HintStyle::Full, Rgba::None) => LoadFlag::TARGET_NORMAL,
         };
 
         // Non scalable fonts only have bitmaps, so disabling them entirely is likely not a
@@ -558,12 +564,12 @@ impl FreeTypeRasterizer {
 
     fn ft_render_mode(pat: &PatternRef) -> freetype::RenderMode {
         let antialias = pat.antialias().next().unwrap_or(true);
-        let rgba = pat.rgba().next().unwrap_or(fc::Rgba::Unknown);
+        let rgba = pat.rgba().next().unwrap_or(Rgba::Unknown);
 
         match (antialias, rgba) {
             (false, _) => freetype::RenderMode::Mono,
-            (_, fc::Rgba::Rgb) | (_, fc::Rgba::Bgr) => freetype::RenderMode::Lcd,
-            (_, fc::Rgba::Vrgb) | (_, fc::Rgba::Vbgr) => freetype::RenderMode::LcdV,
+            (_, Rgba::Rgb) | (_, Rgba::Bgr) => freetype::RenderMode::Lcd,
+            (_, Rgba::Vrgb) | (_, Rgba::Vbgr) => freetype::RenderMode::LcdV,
             (true, _) => freetype::RenderMode::Normal,
         }
     }
@@ -582,6 +588,7 @@ impl FreeTypeRasterizer {
     /// The i32 value in the return type is the number of pixels per row.
     fn normalize_buffer(
         bitmap: &freetype::bitmap::Bitmap,
+        rgba: &Rgba,
     ) -> freetype::FtResult<(i32, i32, BitmapBuffer)> {
         use freetype::bitmap::PixelMode;
 
@@ -593,7 +600,16 @@ impl FreeTypeRasterizer {
                 for i in 0..bitmap.rows() {
                     let start = (i as usize) * pitch;
                     let stop = start + bitmap.width() as usize;
-                    packed.extend_from_slice(&buf[start..stop]);
+                    match rgba {
+                        Rgba::Bgr => {
+                            for j in (start..stop).step_by(3) {
+                                packed.push(buf[j + 2]);
+                                packed.push(buf[j + 1]);
+                                packed.push(buf[j]);
+                            }
+                        },
+                        _ => packed.extend_from_slice(&buf[start..stop]),
+                    }
                 }
                 Ok((bitmap.rows(), bitmap.width() / 3, BitmapBuffer::RGB(packed)))
             },
@@ -601,6 +617,10 @@ impl FreeTypeRasterizer {
                 for i in 0..bitmap.rows() / 3 {
                     for j in 0..bitmap.width() {
                         for k in 0..3 {
+                            let k = match rgba {
+                                Rgba::Vbgr => 2 - k,
+                                _ => k,
+                            };
                             let offset = ((i as usize) * 3 + k) * pitch + (j as usize);
                             packed.push(buf[offset]);
                         }
