@@ -101,6 +101,7 @@ impl Rasterize for FreeTypeRasterizer {
     fn new(device_pixel_ratio: f32, _: bool) -> Result<FreeTypeRasterizer, Error> {
         let library = Library::init()?;
 
+        #[cfg(ft_set_default_properties_available)]
         unsafe {
             // Initialize default properties, like user preferred interpreter.
             freetype_sys::FT_Set_Default_Properties(library.raw());

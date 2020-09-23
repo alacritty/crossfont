@@ -11,3 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Minimum Rust version has been bumped to 1.43.0
+
+### Fixed
+
+- Compilation with FreeType version below 2.8.0 on Linux/BSD
