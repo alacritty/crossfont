@@ -13,8 +13,8 @@ tasks:
   - stable: |
       cd crossfont
       $HOME/.cargo/bin/cargo +stable test
-  - 1-41-0: |
-      $HOME/.cargo/bin/rustup toolchain install --profile minimal 1.41.0
+  - 1-43-0: |
+      $HOME/.cargo/bin/rustup toolchain install --profile minimal 1.43.0
       cd crossfont
       rm Cargo.lock
-      $HOME/.cargo/bin/cargo +1.41.0 test
+      $HOME/.cargo/bin/cargo +1.43.0 test

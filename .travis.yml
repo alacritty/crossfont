@@ -9,7 +9,7 @@ os:
   - windows
 
 rust:
-  - 1.41.0
+  - 1.43.0
   - stable
 
 matrix:
