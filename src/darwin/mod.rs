@@ -2,6 +2,7 @@
 
 #![allow(improper_ctypes)]
 use std::collections::HashMap;
+use std::matches;
 use std::path::PathBuf;
 use std::ptr;
 
@@ -192,14 +193,9 @@ impl Rasterizer {
         weight: Weight,
         size: Size,
     ) -> Result<Font, Error> {
-        let bold = match weight {
-            Weight::Bold => true,
-            _ => false,
-        };
-        let italic = match slant {
-            Slant::Normal => false,
-            _ => true,
-        };
+        let bold = matches!(weight, Weight::Bold);
+        let italic = !matches!(slant, Slant::Normal);
+
         let scaled_size = f64::from(size.as_f32_pts()) * f64::from(self.device_pixel_ratio);
 
         let descriptors = descriptors_for_family(&desc.name[..]);
