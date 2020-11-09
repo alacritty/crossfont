@@ -25,7 +25,7 @@ tasks:
   - clippy: |
       cd crossfont
       rustup component add clippy
-      cargo clippy --all-targets
+      cargo clippy
   - oldstable: |
       cd crossfont
       rustup toolchain install --profile minimal 1.43.1
