@@ -5,6 +5,7 @@ packages:
   - cmake
   - freetype2
   - fontconfig
+  - dina-font
 
 sources:
   - https://github.com/alacritty/crossfont
