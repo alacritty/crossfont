@@ -6,7 +6,7 @@
 
 #![deny(clippy::all, clippy::if_not_else, clippy::enum_glob_use, clippy::wrong_pub_self_convention)]
 
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::ops::{Add, Mul};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -14,12 +14,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(not(any(target_os = "macos", windows)))]
 pub mod ft;
 #[cfg(not(any(target_os = "macos", windows)))]
-pub use ft::{Error, FreeTypeRasterizer as Rasterizer};
+pub use ft::FreeTypeRasterizer as Rasterizer;
 
 #[cfg(windows)]
 pub mod directwrite;
 #[cfg(windows)]
-pub use directwrite::{DirectWriteRasterizer as Rasterizer, Error};
+pub use directwrite::DirectWriteRasterizer as Rasterizer;
 
 // If target is macos, reexport everything from darwin.
 #[cfg(target_os = "macos")]
@@ -203,23 +203,58 @@ pub struct Metrics {
     pub strikeout_thickness: f32,
 }
 
-pub trait Rasterize {
-    /// Errors occurring in Rasterize methods.
-    type Err: ::std::error::Error + Send + Sync + 'static;
+/// Errors occuring when using the rasterizer.
+#[derive(Debug)]
+pub enum Error {
+    /// Couldn't find font matching description.
+    MissingFont(FontDesc),
 
+    /// Tried to get size metrics from a Face that didn't have a size.
+    MissingSizeMetrics,
+
+    MissingGlyph(RasterizedGlyph),
+
+    /// Requested an operation with a FontKey that isn't known to the rasterizer.
+    FontNotLoaded,
+
+    /// Error from platfrom's font system.
+    PlatformError(String),
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::MissingFont(font) => write!(f, "Unable to find the font {}", font),
+            Error::MissingGlyph(glyph) => write!(f, "Unable to find glyph for char {}", glyph.c),
+            Error::FontNotLoaded => f.write_str("Tried to use a font that hasn't been loaded"),
+            Error::MissingSizeMetrics => {
+                f.write_str("Tried to get size metrics from a face without a size")
+            },
+            Error::PlatformError(err) => write!(f, "{:?}", err),
+        }
+    }
+}
+
+pub trait Rasterize {
     /// Create a new Rasterizer.
-    fn new(device_pixel_ratio: f32, use_thin_strokes: bool) -> Result<Self, Self::Err>
+    fn new(device_pixel_ratio: f32, use_thin_strokes: bool) -> Result<Self, Error>
     where
         Self: Sized;
 
     /// Get `Metrics` for the given `FontKey`.
-    fn metrics(&self, _: FontKey, _: Size) -> Result<Metrics, Self::Err>;
+    fn metrics(&self, _: FontKey, _: Size) -> Result<Metrics, Error>;
 
     /// Load the font described by `FontDesc` and `Size`.
-    fn load_font(&mut self, _: &FontDesc, _: Size) -> Result<FontKey, Self::Err>;
+    fn load_font(&mut self, _: &FontDesc, _: Size) -> Result<FontKey, Error>;
 
     /// Rasterize the glyph described by `GlyphKey`..
-    fn get_glyph(&mut self, _: GlyphKey) -> Result<RasterizedGlyph, Self::Err>;
+    fn get_glyph(&mut self, _: GlyphKey) -> Result<RasterizedGlyph, Error>;
 
     /// Update the Rasterizer's DPI factor.
     fn update_dpr(&mut self, device_pixel_ratio: f32);

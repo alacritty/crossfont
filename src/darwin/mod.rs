@@ -36,7 +36,8 @@ pub mod byte_order;
 use byte_order::kCGBitmapByteOrder32Host;
 
 use super::{
-    BitmapBuffer, FontDesc, FontKey, GlyphKey, Metrics, RasterizedGlyph, Size, Slant, Style, Weight,
+    BitmapBuffer, Error, FontDesc, FontKey, GlyphKey, Metrics, RasterizedGlyph, Size, Slant, Style,
+    Weight,
 };
 
 /// Font descriptor.
@@ -76,42 +77,7 @@ pub struct Rasterizer {
     use_thin_strokes: bool,
 }
 
-/// Errors occurring when using the core text rasterizer.
-#[derive(Debug)]
-pub enum Error {
-    /// Tried to rasterize a glyph but it was not available.
-    MissingGlyph(char),
-
-    /// Couldn't find font matching description.
-    MissingFont(FontDesc),
-
-    /// Requested an operation with a FontKey that isn't known to the rasterizer.
-    FontNotLoaded,
-}
-
-impl ::std::error::Error for Error {
-    fn description(&self) -> &str {
-        match *self {
-            Error::MissingGlyph(ref _c) => "Unable to find the requested glyph",
-            Error::MissingFont(ref _desc) => "Unable to find the requested font",
-            Error::FontNotLoaded => "Tried to operate on font that hasn't been loaded",
-        }
-    }
-}
-
-impl ::std::fmt::Display for Error {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        match *self {
-            Error::MissingGlyph(ref c) => write!(f, "Glyph not found for char {:?}", c),
-            Error::MissingFont(ref desc) => write!(f, "Unable to find the font {}", desc),
-            Error::FontNotLoaded => f.write_str("Tried to use a font that hasn't been loaded"),
-        }
-    }
-}
-
 impl crate::Rasterize for Rasterizer {
-    type Err = Error;
-
     fn new(device_pixel_ratio: f32, use_thin_strokes: bool) -> Result<Rasterizer, Error> {
         Ok(Rasterizer {
             fonts: HashMap::new(),
@@ -146,18 +112,34 @@ impl crate::Rasterize for Rasterizer {
         // Get loaded font.
         let font = self.fonts.get(&glyph.font_key).ok_or(Error::FontNotLoaded)?;
 
-        // First try the font itself as a direct hit.
-        self.maybe_get_glyph(glyph, font).unwrap_or_else(|| {
-            // Then try fallbacks.
-            for fallback in &font.fallbacks {
-                if let Some(result) = self.maybe_get_glyph(glyph, &fallback) {
-                    // Found a fallback.
-                    return result;
-                }
-            }
-            // No fallback, give up.
-            Err(Error::MissingGlyph(glyph.c))
-        })
+        // Find a font where the given char is presented.
+        let mut glyph_index = font.glyph_index(glyph.c);
+        let font = match glyph_index {
+            Some(_) => font,
+            None => font
+                .fallbacks
+                .iter()
+                .find(|font| {
+                    glyph_index = font.glyph_index(glyph.c);
+                    glyph_index.is_some()
+                })
+                .unwrap_or(font),
+        };
+
+        let is_missing_glyph = glyph_index.is_none();
+
+        // According to
+        // https://developer.apple.com/fonts/TrueType-Reference-Manual/RM07/appendixB.html
+        // the index of 0 must be a missing glyph character.
+        let glyph_index = glyph_index.unwrap_or(0);
+
+        let glyph = font.get_glyph(glyph.c, glyph_index, self.use_thin_strokes);
+
+        if is_missing_glyph {
+            Err(Error::MissingGlyph(glyph))
+        } else {
+            Ok(glyph)
+        }
     }
 
     fn update_dpr(&mut self, device_pixel_ratio: f32) {
@@ -215,21 +197,6 @@ impl Rasterizer {
                 self.get_matching_face(desc, slant, weight, size)
             },
         }
-    }
-
-    /// Helper to try and get a glyph for a given font. Used for font fallback.
-    fn maybe_get_glyph(
-        &self,
-        glyph: GlyphKey,
-        font: &Font,
-    ) -> Option<Result<RasterizedGlyph, Error>> {
-        let scaled_size = self.device_pixel_ratio * glyph.size.as_f32_pts();
-        font.get_glyph(glyph.c, f64::from(scaled_size), self.use_thin_strokes)
-            .map(|r| Some(Ok(r)))
-            .unwrap_or_else(|e| match e {
-                Error::MissingGlyph(_) => None,
-                _ => Some(Err(e)),
-            })
     }
 }
 
@@ -455,12 +422,9 @@ impl Font {
     pub fn get_glyph(
         &self,
         character: char,
-        _size: f64,
+        glyph_index: u32,
         use_thin_strokes: bool,
-    ) -> Result<RasterizedGlyph, Error> {
-        let glyph_index =
-            self.glyph_index(character).ok_or_else(|| Error::MissingGlyph(character))?;
-
+    ) -> RasterizedGlyph {
         let bounds = self.bounding_rect_for_glyph(Default::default(), glyph_index);
 
         let rasterized_left = bounds.origin.x.floor() as i32;
@@ -471,14 +435,14 @@ impl Font {
         let rasterized_height = (rasterized_descent + rasterized_ascent) as u32;
 
         if rasterized_width == 0 || rasterized_height == 0 {
-            return Ok(RasterizedGlyph {
+            return RasterizedGlyph {
                 c: ' ',
                 width: 0,
                 height: 0,
                 top: 0,
                 left: 0,
                 buf: BitmapBuffer::RGB(Vec::new()),
-            });
+            };
         }
 
         let mut cg_context = CGContext::create_bitmap_context(
@@ -536,14 +500,14 @@ impl Font {
             BitmapBuffer::RGB(byte_order::extract_rgb(&rasterized_pixels))
         };
 
-        Ok(RasterizedGlyph {
+        RasterizedGlyph {
             c: character,
             left: rasterized_left,
             top: (bounds.size.height + bounds.origin.y).ceil() as i32,
             width: rasterized_width as i32,
             height: rasterized_height as i32,
             buf,
-        })
+        }
     }
 
     fn glyph_index(&self, character: char) -> Option<u32> {
@@ -598,8 +562,9 @@ mod tests {
 
         for font in fonts {
             // Get a glyph.
-            for c in &['a', 'b', 'c', 'd'] {
-                let glyph = font.get_glyph(*c, 72., false).unwrap();
+            for character in &['a', 'b', 'c', 'd'] {
+                let glyph_index = font.glyph_index(*character).unwrap();
+                let glyph = font.get_glyph(*character, glyph_index, false);
 
                 let buf = match &glyph.buf {
                     BitmapBuffer::RGB(buf) => buf,
