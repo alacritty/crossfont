@@ -10,6 +10,9 @@ packages:
 sources:
   - https://github.com/alacritty/crossfont
 
+environment:
+  PATH: /home/build/.cargo/bin:/bin:/usr/bin:/usr/local/bin
+
 tasks:
   - rustup: |
       curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable --profile minimal
