@@ -1,17 +1,17 @@
-image: freebsd/latest
+image: archlinux
 
 packages:
-  - devel/cmake
-  - devel/pkgconf
-  - print/freetype2
-  - x11-fonts/fontconfig
-  - x11-fonts/dejavu
+  - pkg-config
+  - cmake
+  - freetype2
+  - fontconfig
+  - dina-font
 
 sources:
   - https://github.com/alacritty/crossfont
 
 environment:
-  PATH: /home/build/.cargo/bin:/bin:/usr/bin:/usr/local/bin
+  PATH: /home/build/.cargo/bin:/usr/bin/
 
 tasks:
   - rustup: |
@@ -19,6 +19,10 @@ tasks:
   - test: |
       cd crossfont
       cargo test
+  - rustfmt: |
+      cd crossfont
+      rustup toolchain install nightly -c rustfmt
+      cargo +nightly fmt -- --check
   - clippy: |
       cd crossfont
       rustup component add clippy
