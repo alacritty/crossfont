@@ -115,7 +115,7 @@ impl Rasterize for FreeTypeRasterizer {
     }
 
     fn metrics(&self, key: FontKey, _size: Size) -> Result<Metrics, Error> {
-        let face = &mut self.faces.get(&key).ok_or(Error::FontNotLoaded)?;
+        let face = &mut self.faces.get(&key).ok_or(Error::UnknownFontKey)?;
         let full = self.full_metrics(&face)?;
 
         let height = (full.size_metrics.height / 64) as f64;
@@ -237,11 +237,11 @@ impl FreeTypeRasterizer {
 
         // Get font list using pattern. First font is the primary one while the rest are fallbacks.
         let matched_fonts =
-            fc::font_sort(&config, &pattern).ok_or_else(|| Error::MissingFont(desc.to_owned()))?;
+            fc::font_sort(&config, &pattern).ok_or_else(|| Error::FontNotFound(desc.to_owned()))?;
         let mut matched_fonts = matched_fonts.into_iter();
 
         let primary_font =
-            matched_fonts.next().ok_or_else(|| Error::MissingFont(desc.to_owned()))?;
+            matched_fonts.next().ok_or_else(|| Error::FontNotFound(desc.to_owned()))?;
 
         // We should render patterns to get values like `pixelsizefixupfactor`.
         let primary_font = pattern.render_prepare(config, primary_font);
@@ -257,7 +257,7 @@ impl FreeTypeRasterizer {
         // Load font if we haven't loaded it yet.
         if !self.faces.contains_key(&primary_font_key) {
             self.face_from_pattern(&primary_font, primary_font_key)
-                .and_then(|pattern| pattern.ok_or_else(|| Error::MissingFont(desc.to_owned())))?;
+                .and_then(|pattern| pattern.ok_or_else(|| Error::FontNotFound(desc.to_owned())))?;
         }
 
         // Coverage for fallback fonts.
@@ -374,7 +374,7 @@ impl FreeTypeRasterizer {
 
     fn face_for_glyph(&mut self, glyph_key: GlyphKey) -> Result<FontKey, Error> {
         if let Some(face) = self.faces.get(&glyph_key.font_key) {
-            let index = face.ft_face.get_char_index(glyph_key.c as usize);
+            let index = face.ft_face.get_char_index(glyph_key.character as usize);
 
             if index != 0 {
                 return Ok(glyph_key.font_key);
@@ -388,7 +388,7 @@ impl FreeTypeRasterizer {
         let fallback_list = self.fallback_lists.get(&glyph.font_key).unwrap();
 
         // Check whether glyph is presented in any fallback font.
-        if !fallback_list.coverage.has_char(glyph.c) {
+        if !fallback_list.coverage.has_char(glyph.character) {
             return Ok(glyph.font_key);
         }
 
@@ -397,7 +397,7 @@ impl FreeTypeRasterizer {
             let font_pattern = &fallback_font.pattern;
             match self.faces.get(&font_key) {
                 Some(face) => {
-                    let index = face.ft_face.get_char_index(glyph.c as usize);
+                    let index = face.ft_face.get_char_index(glyph.character as usize);
 
                     // We found something in a current face, so let's use it.
                     if index != 0 {
@@ -405,7 +405,9 @@ impl FreeTypeRasterizer {
                     }
                 },
                 None => {
-                    if font_pattern.get_charset().map(|cs| cs.has_char(glyph.c)) != Some(true) {
+                    if font_pattern.get_charset().map(|cs| cs.has_char(glyph.character))
+                        != Some(true)
+                    {
                         continue;
                     }
 
@@ -425,7 +427,7 @@ impl FreeTypeRasterizer {
         // Render a normal character if it's not a cursor.
         let font_key = self.face_for_glyph(glyph_key)?;
         let face = &self.faces[&font_key];
-        let index = face.ft_face.get_char_index(glyph_key.c as usize);
+        let index = face.ft_face.get_char_index(glyph_key.character as usize);
         let is_missing_glyph = index == 0;
         let pixelsize = face
             .non_scalable
@@ -469,33 +471,33 @@ impl FreeTypeRasterizer {
 
         glyph.render_glyph(face.render_mode)?;
 
-        let (pixel_height, pixel_width, buf) = Self::normalize_buffer(&glyph.bitmap(), &face.rgba)?;
+        let (pixel_height, pixel_width, buffer) =
+            Self::normalize_buffer(&glyph.bitmap(), &face.rgba)?;
 
         let rasterized_glyph = RasterizedGlyph {
-            c: glyph_key.c,
+            character: glyph_key.character,
             top: glyph.bitmap_top(),
             left: glyph.bitmap_left(),
             width: pixel_width,
             height: pixel_height,
-            buf,
+            buffer,
         };
 
-        match (is_missing_glyph, face.colored) {
-            (true, _) => Err(Error::MissingGlyph(rasterized_glyph)),
-            (_, false) => Ok(rasterized_glyph),
-            (_, true) => {
-                let fixup_factor = match face.pixelsize_fixup_factor {
-                    Some(fixup_factor) => fixup_factor,
-                    None => {
-                        // Fallback if the user has bitmap scaling disabled.
-                        let metrics =
-                            face.ft_face.size_metrics().ok_or(Error::MissingSizeMetrics)?;
-                        f64::from(pixelsize) / f64::from(metrics.y_ppem)
-                    },
-                };
+        if is_missing_glyph {
+            Err(Error::MissingGlyph(rasterized_glyph))
+        } else if face.colored {
+            let fixup_factor = match face.pixelsize_fixup_factor {
+                Some(fixup_factor) => fixup_factor,
+                None => {
+                    // Fallback if the user has bitmap scaling disabled.
+                    let metrics = face.ft_face.size_metrics().ok_or(Error::MissingSizeMetrics)?;
+                    f64::from(pixelsize) / f64::from(metrics.y_ppem)
+                },
+            };
 
-                Ok(downsample_bitmap(rasterized_glyph, fixup_factor))
-            },
+            Ok(downsample_bitmap(rasterized_glyph, fixup_factor))
+        } else {
+            Ok(rasterized_glyph)
         }
     }
 
@@ -700,7 +702,7 @@ impl FreeTypeRasterizer {
 /// `fixup_factor`.
 fn downsample_bitmap(mut bitmap_glyph: RasterizedGlyph, fixup_factor: f64) -> RasterizedGlyph {
     // Only scale colored buffers which are bigger than required.
-    let bitmap_buffer = match (&bitmap_glyph.buf, fixup_factor.partial_cmp(&1.0)) {
+    let bitmap_buffer = match (&bitmap_glyph.buffer, fixup_factor.partial_cmp(&1.0)) {
         (BitmapBuffer::RGBA(buffer), Some(Ordering::Less)) => buffer,
         _ => return bitmap_glyph,
     };
@@ -754,7 +756,7 @@ fn downsample_bitmap(mut bitmap_glyph: RasterizedGlyph, fixup_factor: f64) -> Ra
         }
     }
 
-    bitmap_glyph.buf = BitmapBuffer::RGBA(downsampled_buffer);
+    bitmap_glyph.buffer = BitmapBuffer::RGBA(downsampled_buffer);
 
     // Downscale the metrics.
     bitmap_glyph.top = (f64::from(bitmap_glyph.top) * fixup_factor) as i32;

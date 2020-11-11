@@ -2,6 +2,7 @@
 
 #![allow(improper_ctypes)]
 use std::collections::HashMap;
+use std::iter;
 use std::path::PathBuf;
 use std::ptr;
 
@@ -89,7 +90,7 @@ impl crate::Rasterize for Rasterizer {
 
     /// Get metrics for font specified by FontKey.
     fn metrics(&self, key: FontKey, _size: Size) -> Result<Metrics, Error> {
-        let font = self.fonts.get(&key).ok_or(Error::FontNotLoaded)?;
+        let font = self.fonts.get(&key).ok_or(Error::UnknownFontKey)?;
 
         Ok(font.metrics())
     }
@@ -110,30 +111,24 @@ impl crate::Rasterize for Rasterizer {
     /// Get rasterized glyph for given glyph key.
     fn get_glyph(&mut self, glyph: GlyphKey) -> Result<RasterizedGlyph, Error> {
         // Get loaded font.
-        let font = self.fonts.get(&glyph.font_key).ok_or(Error::FontNotLoaded)?;
+        let font = self.fonts.get(&glyph.font_key).ok_or(Error::UnknownFontKey)?;
 
-        // Find a font where the given char is presented.
-        let mut glyph_index = font.glyph_index(glyph.c);
-        let font = match glyph_index {
-            Some(_) => font,
-            None => font
-                .fallbacks
-                .iter()
-                .find(|font| {
-                    glyph_index = font.glyph_index(glyph.c);
-                    glyph_index.is_some()
-                })
-                .unwrap_or(font),
-        };
+        // Find a font where the given char is present.
+        let (font, glyph_index) = iter::once(font)
+            .chain(font.fallbacks.iter())
+            .find_map(|font| {
+                let glyph_index = font.glyph_index(glyph.character);
+                glyph_index.map(|glyph_index| (font, Some(glyph_index)))
+            })
+            .unwrap_or((font, None));
 
         let is_missing_glyph = glyph_index.is_none();
 
-        // According to
+        // According to the index of 0 must be a missing glyph character:
         // https://developer.apple.com/fonts/TrueType-Reference-Manual/RM07/appendixB.html
-        // the index of 0 must be a missing glyph character.
         let glyph_index = glyph_index.unwrap_or(0);
 
-        let glyph = font.get_glyph(glyph.c, glyph_index, self.use_thin_strokes);
+        let glyph = font.get_glyph(glyph.character, glyph_index, self.use_thin_strokes);
 
         if is_missing_glyph {
             Err(Error::MissingGlyph(glyph))
@@ -164,7 +159,7 @@ impl Rasterizer {
             }
         }
 
-        Err(Error::MissingFont(desc.to_owned()))
+        Err(Error::FontNotFound(desc.to_owned()))
     }
 
     fn get_matching_face(
@@ -187,7 +182,7 @@ impl Rasterizer {
             }
         }
 
-        Err(Error::MissingFont(desc.to_owned()))
+        Err(Error::FontNotFound(desc.to_owned()))
     }
 
     fn get_font(&mut self, desc: &FontDesc, size: Size) -> Result<Font, Error> {
@@ -436,12 +431,12 @@ impl Font {
 
         if rasterized_width == 0 || rasterized_height == 0 {
             return RasterizedGlyph {
-                c: ' ',
+                character: ' ',
                 width: 0,
                 height: 0,
                 top: 0,
                 left: 0,
-                buf: BitmapBuffer::RGB(Vec::new()),
+                buffer: BitmapBuffer::RGB(Vec::new()),
             };
         }
 
@@ -494,26 +489,26 @@ impl Font {
 
         let rasterized_pixels = cg_context.data().to_vec();
 
-        let buf = if is_colored {
+        let buffer = if is_colored {
             BitmapBuffer::RGBA(byte_order::extract_rgba(&rasterized_pixels))
         } else {
             BitmapBuffer::RGB(byte_order::extract_rgb(&rasterized_pixels))
         };
 
         RasterizedGlyph {
-            c: character,
+            character,
             left: rasterized_left,
             top: (bounds.size.height + bounds.origin.y).ceil() as i32,
             width: rasterized_width as i32,
             height: rasterized_height as i32,
-            buf,
+            buffer,
         }
     }
 
     fn glyph_index(&self, character: char) -> Option<u32> {
         // Encode this char as utf-16.
-        let mut buf = [0; 2];
-        let encoded: &[u16] = character.encode_utf16(&mut buf);
+        let mut buffer = [0; 2];
+        let encoded: &[u16] = character.encode_utf16(&mut buffer);
         // And use the utf-16 buffer to get the index.
         self.glyph_index_utf16(encoded)
     }
@@ -566,16 +561,15 @@ mod tests {
                 let glyph_index = font.glyph_index(*character).unwrap();
                 let glyph = font.get_glyph(*character, glyph_index, false);
 
-                let buf = match &glyph.buf {
-                    BitmapBuffer::RGB(buf) => buf,
-                    BitmapBuffer::RGBA(buf) => buf,
+                let buffer = match &glyph.buffer {
+                    BitmapBuffer::RGB(buffer) | BitmapBuffer::RGBA(buffer) => buffer,
                 };
 
                 // Debug the glyph.. sigh.
                 for row in 0..glyph.height {
                     for col in 0..glyph.width {
                         let index = ((glyph.width * 3 * row) + (col * 3)) as usize;
-                        let value = buf[index];
+                        let value = buffer[index];
                         let c = match value {
                             0..=50 => ' ',
                             51..=100 => '.',

@@ -98,7 +98,7 @@ impl FontKey {
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct GlyphKey {
-    pub c: char,
+    pub character: char,
     pub font_key: FontKey,
     pub size: Size,
 }
@@ -149,12 +149,12 @@ impl From<f32> for Size {
 
 #[derive(Clone)]
 pub struct RasterizedGlyph {
-    pub c: char,
+    pub character: char,
     pub width: i32,
     pub height: i32,
     pub top: i32,
     pub left: i32,
-    pub buf: BitmapBuffer,
+    pub buffer: BitmapBuffer,
 }
 
 #[derive(Clone, Debug)]
@@ -169,12 +169,12 @@ pub enum BitmapBuffer {
 impl Default for RasterizedGlyph {
     fn default() -> RasterizedGlyph {
         RasterizedGlyph {
-            c: ' ',
+            character: ' ',
             width: 0,
             height: 0,
             top: 0,
             left: 0,
-            buf: BitmapBuffer::RGB(Vec::new()),
+            buffer: BitmapBuffer::RGB(Vec::new()),
         }
     }
 }
@@ -182,12 +182,12 @@ impl Default for RasterizedGlyph {
 impl fmt::Debug for RasterizedGlyph {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("RasterizedGlyph")
-            .field("c", &self.c)
+            .field("character", &self.character)
             .field("width", &self.width)
             .field("height", &self.height)
             .field("top", &self.top)
             .field("left", &self.left)
-            .field("buf", &self.buf)
+            .field("buffer", &self.buffer)
             .finish()
     }
 }
@@ -207,7 +207,7 @@ pub struct Metrics {
 #[derive(Debug)]
 pub enum Error {
     /// Couldn't find font matching description.
-    MissingFont(FontDesc),
+    FontNotFound(FontDesc),
 
     /// Tried to get size metrics from a Face that didn't have a size.
     MissingSizeMetrics,
@@ -215,7 +215,7 @@ pub enum Error {
     MissingGlyph(RasterizedGlyph),
 
     /// Requested an operation with a FontKey that isn't known to the rasterizer.
-    FontNotLoaded,
+    UnknownFontKey,
 
     /// Error from platfrom's font system.
     PlatformError(String),
@@ -230,9 +230,11 @@ impl std::error::Error for Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Error::MissingFont(font) => write!(f, "Unable to find the font {}", font),
-            Error::MissingGlyph(glyph) => write!(f, "Unable to find glyph for char {}", glyph.c),
-            Error::FontNotLoaded => f.write_str("Tried to use a font that hasn't been loaded"),
+            Error::FontNotFound(font) => write!(f, "Unable to find the font: {:?}", font),
+            Error::MissingGlyph(glyph) => {
+                write!(f, "Unable to find glyph for char {}", glyph.character)
+            },
+            Error::UnknownFontKey => f.write_str("Tried to use a font that hasn't been loaded"),
             Error::MissingSizeMetrics => {
                 f.write_str("Tried to get size metrics from a face without a size")
             },

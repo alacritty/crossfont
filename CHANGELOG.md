@@ -10,8 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Rasterizer no longer uses associated `Err` type and now has common type for `Error`
-- If the glyph you've requested is missing, the resulted missing glyph char will be in `Error::MissingGlyph`
+- Rasterizer no longer uses associated platform-specific error type and now has common type for `Error`
+- If the glyph you've requested is missing, the resulting missing glyph char will be in `Error::MissingGlyph`
+- `RasterizedGlyph`'s `c` and `buf` fields are now named `character` and `buffer` respectively
+- `GlyphKey`'s `c` field is now named `character`
 
 ## 0.1.1
 

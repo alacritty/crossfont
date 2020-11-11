@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::OsString;
+use std::iter;
 use std::os::windows::ffi::OsStringExt;
 
 use dwrote::{
@@ -71,47 +72,45 @@ impl DirectWriteRasterizer {
             dwrote::DWRITE_MEASURING_MODE_NATURAL,
             0.0,
             0.0,
-        )
-        .map_err(Error::from)?;
+        )?;
 
-        let bounds = glyph_analysis
-            .get_alpha_texture_bounds(dwrote::DWRITE_TEXTURE_CLEARTYPE_3x1)
-            .map_err(Error::from)?;
+        let bounds =
+            glyph_analysis.get_alpha_texture_bounds(dwrote::DWRITE_TEXTURE_CLEARTYPE_3x1)?;
 
-        let buf = glyph_analysis
-            .create_alpha_texture(dwrote::DWRITE_TEXTURE_CLEARTYPE_3x1, bounds)
-            .map_err(Error::from)?;
+        let buffer = BitmapBuffer::RGB(
+            glyph_analysis.create_alpha_texture(dwrote::DWRITE_TEXTURE_CLEARTYPE_3x1, bounds)?,
+        );
 
         Ok(RasterizedGlyph {
-            c: character,
+            character,
             width: (bounds.right - bounds.left) as i32,
             height: (bounds.bottom - bounds.top) as i32,
             top: -bounds.top,
             left: bounds.left,
-            buf: BitmapBuffer::RGB(buf),
+            buffer,
         })
     }
 
     fn get_loaded_font(&self, font_key: FontKey) -> Result<&Font, Error> {
-        self.fonts.get(&font_key).ok_or(Error::FontNotLoaded)
+        self.fonts.get(&font_key).ok_or(Error::UnknownFontKey)
     }
 
-    fn get_glyph_index(&self, face: &FontFace, c: char) -> Option<u16> {
-        match *face.get_glyph_indices(&[c as u32]).first()? {
-            // DirectWrite returns 0 if the glyph does not exist in the font.
-            0 => None,
-            glyph_index => Some(glyph_index),
-        }
+    fn get_glyph_index(&self, face: &FontFace, character: char) -> Option<u16> {
+        // DirectWrite returns 0 if the glyph does not exist in the font.
+        face.get_glyph_indices(&[character as u32])
+            .first()
+            .copied()
+            .filter(|glyph_index| glyph_index != &0)
     }
 
-    fn get_fallback_font(&self, loaded_font: &Font, c: char) -> Option<dwrote::Font> {
+    fn get_fallback_font(&self, loaded_font: &Font, character: char) -> Option<dwrote::Font> {
         let fallback = self.fallback_sequence.as_ref()?;
 
-        let mut buf = [0u16; 2];
-        c.encode_utf16(&mut buf);
+        let mut buffer = [0u16; 2];
+        character.encode_utf16(&mut buffer);
 
-        let length = c.len_utf16() as u32;
-        let utf16_codepoints = &buf[..length as usize];
+        let length = character.len_utf16() as u32;
+        let utf16_codepoints = &buffer[..length as usize];
 
         let locale = get_current_locale();
 
@@ -194,7 +193,7 @@ impl crate::Rasterize for DirectWriteRasterizer {
         let family = self
             .available_fonts
             .get_font_family_by_name(&desc.name)
-            .ok_or_else(|| Error::MissingFont(desc.clone()))?;
+            .ok_or_else(|| Error::FontNotFound(desc.clone()))?;
 
         let font = match desc.style {
             Style::Description { weight, slant } => {
@@ -208,7 +207,7 @@ impl crate::Rasterize for DirectWriteRasterizer {
 
                 loop {
                     if idx == count {
-                        break Err(Error::MissingFont(desc.clone()));
+                        break Err(Error::FontNotFound(desc.clone()));
                     }
 
                     let font = family.get_font(idx);
@@ -232,28 +231,25 @@ impl crate::Rasterize for DirectWriteRasterizer {
     fn get_glyph(&mut self, glyph: GlyphKey) -> Result<RasterizedGlyph, Error> {
         let loaded_font = self.get_loaded_font(glyph.font_key)?;
 
-        let mut glyph_index = self.get_glyph_index(&loaded_font.face, glyph.c);
         let fallback_font;
-
-        let font = match glyph_index {
-            Some(_) => loaded_font,
-            None => match self.get_fallback_font(&loaded_font, glyph.c) {
-                None => loaded_font,
-                Some(font) => {
-                    fallback_font = Font::from(font);
-                    glyph_index = self.get_glyph_index(&fallback_font.face, glyph.c);
-
-                    &fallback_font
-                },
-            },
-        };
+        let (font, glyph_index) = iter::once(loaded_font)
+            .chain({
+                fallback_font =
+                    self.get_fallback_font(&loaded_font, glyph.character).map(Font::from);
+                &fallback_font
+            })
+            .find_map(|font| {
+                let glyph_index = self.get_glyph_index(&font.face, glyph.character);
+                glyph_index.map(|glyph_index| (font, Some(glyph_index)))
+            })
+            .unwrap_or((loaded_font, None));
 
         // DirectWrite uses 0 for missing glyph symbols.
         let is_missing_glyph = glyph_index.is_none();
         let glyph_index = glyph_index.unwrap_or(0);
 
         let rasterized_glyph =
-            self.rasterize_glyph(&font.face, glyph.size, glyph.c, glyph_index)?;
+            self.rasterize_glyph(&font.face, glyph.size, glyph.character, glyph_index)?;
 
         if is_missing_glyph {
             Err(Error::MissingGlyph(rasterized_glyph))
@@ -303,11 +299,12 @@ impl From<Slant> for FontStyle {
 }
 
 fn get_current_locale() -> String {
-    let mut buf = vec![0u16; LOCALE_NAME_MAX_LENGTH];
-    let len = unsafe { GetUserDefaultLocaleName(buf.as_mut_ptr(), buf.len() as i32) as usize };
+    let mut buffer = vec![0u16; LOCALE_NAME_MAX_LENGTH];
+    let len =
+        unsafe { GetUserDefaultLocaleName(buffer.as_mut_ptr(), buffer.len() as i32) as usize };
 
     // `len` includes null byte, which we don't need in Rust.
-    OsString::from_wide(&buf[..len - 1]).into_string().expect("Locale not valid unicode")
+    OsString::from_wide(&buffer[..len - 1]).into_string().expect("Locale not valid unicode")
 }
 
 /// Font fallback information for dwrote's TextAnalysisSource.
