@@ -21,6 +21,8 @@ use super::{
     Slant, Style, Weight,
 };
 
+const MISSING_GLYPH_INDEX: u32 = 0;
+
 struct FallbackFont {
     pattern: Pattern,
     key: FontKey,
@@ -405,9 +407,7 @@ impl FreeTypeRasterizer {
                     }
                 },
                 None => {
-                    if font_pattern.get_charset().map(|cs| cs.has_char(glyph.character))
-                        != Some(true)
-                    {
+                    if font_pattern.get_charset().map_or(false, |cs| cs.has_char(glyph.character)) {
                         continue;
                     }
 
@@ -427,8 +427,7 @@ impl FreeTypeRasterizer {
         // Render a normal character if it's not a cursor.
         let font_key = self.face_for_glyph(glyph_key)?;
         let face = &self.faces[&font_key];
-        let index = face.ft_face.get_char_index(glyph_key.character as usize);
-        let is_missing_glyph = index == 0;
+        let index = face.ft_face.get_char_index(glyph_key.character as usize) as u32;
         let pixelsize = face
             .non_scalable
             .unwrap_or_else(|| glyph_key.size.as_f32_pts() * self.device_pixel_ratio * 96. / 72.);
@@ -442,7 +441,7 @@ impl FreeTypeRasterizer {
             freetype::ffi::FT_Library_SetLcdFilter(ft_lib, face.lcd_filter);
         }
 
-        face.ft_face.load_glyph(index as u32, face.load_flags)?;
+        face.ft_face.load_glyph(index, face.load_flags)?;
 
         let glyph = face.ft_face.glyph();
 
@@ -474,7 +473,7 @@ impl FreeTypeRasterizer {
         let (pixel_height, pixel_width, buffer) =
             Self::normalize_buffer(&glyph.bitmap(), &face.rgba)?;
 
-        let rasterized_glyph = RasterizedGlyph {
+        let mut rasterized_glyph = RasterizedGlyph {
             character: glyph_key.character,
             top: glyph.bitmap_top(),
             left: glyph.bitmap_left(),
@@ -483,20 +482,23 @@ impl FreeTypeRasterizer {
             buffer,
         };
 
-        if is_missing_glyph {
+        if index == MISSING_GLYPH_INDEX {
             Err(Error::MissingGlyph(rasterized_glyph))
-        } else if face.colored {
-            let fixup_factor = match face.pixelsize_fixup_factor {
-                Some(fixup_factor) => fixup_factor,
-                None => {
-                    // Fallback if the user has bitmap scaling disabled.
-                    let metrics = face.ft_face.size_metrics().ok_or(Error::MissingSizeMetrics)?;
-                    f64::from(pixelsize) / f64::from(metrics.y_ppem)
-                },
-            };
-
-            Ok(downsample_bitmap(rasterized_glyph, fixup_factor))
         } else {
+            if face.colored {
+                let fixup_factor = match face.pixelsize_fixup_factor {
+                    Some(fixup_factor) => fixup_factor,
+                    None => {
+                        // Fallback if the user has bitmap scaling disabled.
+                        let metrics =
+                            face.ft_face.size_metrics().ok_or(Error::MissingSizeMetrics)?;
+                        f64::from(pixelsize) / f64::from(metrics.y_ppem)
+                    },
+                };
+
+                rasterized_glyph = downsample_bitmap(rasterized_glyph, fixup_factor);
+            }
+
             Ok(rasterized_glyph)
         }
     }

@@ -41,6 +41,10 @@ use super::{
     Weight,
 };
 
+/// According to the documentation, the index of 0 must be a missing glyph character:
+/// https://developer.apple.com/fonts/TrueType-Reference-Manual/RM07/appendixB.html
+const MISSING_GLYPH_INDEX: u32 = 0;
+
 /// Font descriptor.
 ///
 /// The descriptor provides data about a font and supports creating a font.
@@ -116,21 +120,15 @@ impl crate::Rasterize for Rasterizer {
         // Find a font where the given char is present.
         let (font, glyph_index) = iter::once(font)
             .chain(font.fallbacks.iter())
-            .find_map(|font| {
-                let glyph_index = font.glyph_index(glyph.character);
-                glyph_index.map(|glyph_index| (font, Some(glyph_index)))
+            .find_map(|font| match font.glyph_index(glyph.character) {
+                MISSING_GLYPH_INDEX => None,
+                glyph_index => Some((font, glyph_index)),
             })
-            .unwrap_or((font, None));
-
-        let is_missing_glyph = glyph_index.is_none();
-
-        // According to the index of 0 must be a missing glyph character:
-        // https://developer.apple.com/fonts/TrueType-Reference-Manual/RM07/appendixB.html
-        let glyph_index = glyph_index.unwrap_or(0);
+            .unwrap_or((font, MISSING_GLYPH_INDEX));
 
         let glyph = font.get_glyph(glyph.character, glyph_index, self.use_thin_strokes);
 
-        if is_missing_glyph {
+        if glyph_index == MISSING_GLYPH_INDEX {
             Err(Error::MissingGlyph(glyph))
         } else {
             Ok(glyph)
@@ -400,7 +398,7 @@ impl Font {
     }
 
     fn glyph_advance(&self, character: char) -> f64 {
-        let index = self.glyph_index(character).unwrap();
+        let index = self.glyph_index(character);
 
         let indices = [index as CGGlyph];
 
@@ -505,7 +503,7 @@ impl Font {
         }
     }
 
-    fn glyph_index(&self, character: char) -> Option<u32> {
+    fn glyph_index(&self, character: char) -> u32 {
         // Encode this char as utf-16.
         let mut buffer = [0; 2];
         let encoded: &[u16] = character.encode_utf16(&mut buffer);
@@ -513,7 +511,7 @@ impl Font {
         self.glyph_index_utf16(encoded)
     }
 
-    fn glyph_index_utf16(&self, encoded: &[u16]) -> Option<u32> {
+    fn glyph_index_utf16(&self, encoded: &[u16]) -> u32 {
         // Output buffer for the glyph. for non-BMP glyphs, like
         // emojis, this will be filled with two chars the second
         // always being a 0.
@@ -528,9 +526,9 @@ impl Font {
         };
 
         if res {
-            Some(u32::from(glyphs[0]))
+            u32::from(glyphs[0])
         } else {
-            None
+            MISSING_GLYPH_INDEX
         }
     }
 }
@@ -558,7 +556,7 @@ mod tests {
         for font in fonts {
             // Get a glyph.
             for character in &['a', 'b', 'c', 'd'] {
-                let glyph_index = font.glyph_index(*character).unwrap();
+                let glyph_index = font.glyph_index(*character);
                 let glyph = font.get_glyph(*character, glyph_index, false);
 
                 let buffer = match &glyph.buffer {

@@ -206,12 +206,13 @@ pub struct Metrics {
 /// Errors occuring when using the rasterizer.
 #[derive(Debug)]
 pub enum Error {
-    /// Couldn't find font matching description.
+    /// Unable to find a font matching the description.
     FontNotFound(FontDesc),
 
     /// Tried to get size metrics from a Face that didn't have a size.
     MissingSizeMetrics,
 
+    /// The glyph could not be found in any font.
     MissingGlyph(RasterizedGlyph),
 
     /// Requested an operation with a FontKey that isn't known to the rasterizer.
@@ -230,15 +231,15 @@ impl std::error::Error for Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Error::FontNotFound(font) => write!(f, "Unable to find the font: {:?}", font),
+            Error::FontNotFound(font) => write!(f, "font {:?} not found", font),
             Error::MissingGlyph(glyph) => {
-                write!(f, "Unable to find glyph for char {}", glyph.character)
+                write!(f, "glyph for character {:?} not found", glyph.character)
             },
-            Error::UnknownFontKey => f.write_str("Tried to use a font that hasn't been loaded"),
+            Error::UnknownFontKey => f.write_str("invalid font key"),
             Error::MissingSizeMetrics => {
-                f.write_str("Tried to get size metrics from a face without a size")
+                f.write_str("tried to get size metrics from a face without a size")
             },
-            Error::PlatformError(err) => write!(f, "{:?}", err),
+            Error::PlatformError(err) => write!(f, "{}", err),
         }
     }
 }

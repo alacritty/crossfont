@@ -3,7 +3,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::iter;
 use std::os::windows::ffi::OsStringExt;
 
 use dwrote::{
@@ -19,6 +18,10 @@ use super::{
     BitmapBuffer, Error, FontDesc, FontKey, GlyphKey, Metrics, RasterizedGlyph, Size, Slant, Style,
     Weight,
 };
+
+/// DirectWrite uses 0 for missing glyph symbols.
+/// https://docs.microsoft.com/en-us/typography/opentype/spec/recom#glyph-0-the-notdef-glyph
+const MISSING_GLYPH_INDEX: u16 = 0;
 
 /// Cached DirectWrite font.
 struct Font {
@@ -95,12 +98,9 @@ impl DirectWriteRasterizer {
         self.fonts.get(&font_key).ok_or(Error::UnknownFontKey)
     }
 
-    fn get_glyph_index(&self, face: &FontFace, character: char) -> Option<u16> {
+    fn get_glyph_index(&self, face: &FontFace, character: char) -> u16 {
         // DirectWrite returns 0 if the glyph does not exist in the font.
-        face.get_glyph_indices(&[character as u32])
-            .first()
-            .copied()
-            .filter(|glyph_index| glyph_index != &0)
+        face.get_glyph_indices(&[character as u32]).first().copied().unwrap_or(MISSING_GLYPH_INDEX)
     }
 
     fn get_fallback_font(&self, loaded_font: &Font, character: char) -> Option<dwrote::Font> {
@@ -166,7 +166,7 @@ impl crate::Rasterize for DirectWriteRasterizer {
 
         // Since all monospace characters have the same width, we use `!` for horizontal metrics.
         let character = '!';
-        let glyph_index = self.get_glyph_index(face, character).unwrap_or(0);
+        let glyph_index = self.get_glyph_index(face, character);
 
         let glyph_metrics = face.get_design_glyph_metrics(&[glyph_index], false);
         let hmetrics = glyph_metrics.first().ok_or(Error::MissingSizeMetrics)?;
@@ -232,26 +232,21 @@ impl crate::Rasterize for DirectWriteRasterizer {
         let loaded_font = self.get_loaded_font(glyph.font_key)?;
 
         let fallback_font;
-        let (font, glyph_index) = iter::once(loaded_font)
-            .chain({
-                fallback_font =
-                    self.get_fallback_font(&loaded_font, glyph.character).map(Font::from);
-                &fallback_font
-            })
-            .find_map(|font| {
-                let glyph_index = self.get_glyph_index(&font.face, glyph.character);
-                glyph_index.map(|glyph_index| (font, Some(glyph_index)))
-            })
-            .unwrap_or((loaded_font, None));
-
-        // DirectWrite uses 0 for missing glyph symbols.
-        let is_missing_glyph = glyph_index.is_none();
-        let glyph_index = glyph_index.unwrap_or(0);
+        let mut glyph_index = self.get_glyph_index(&loaded_font.face, glyph.character);
+        let font = if glyph_index != MISSING_GLYPH_INDEX {
+            loaded_font
+        } else if let Some(font) = self.get_fallback_font(&loaded_font, glyph.character) {
+            fallback_font = Font::from(font);
+            glyph_index = self.get_glyph_index(&fallback_font.face, glyph.character);
+            &fallback_font
+        } else {
+            loaded_font
+        };
 
         let rasterized_glyph =
             self.rasterize_glyph(&font.face, glyph.size, glyph.character, glyph_index)?;
 
-        if is_missing_glyph {
+        if glyph_index == MISSING_GLYPH_INDEX {
             Err(Error::MissingGlyph(rasterized_glyph))
         } else {
             Ok(rasterized_glyph)
@@ -325,7 +320,7 @@ impl TextAnalysisSourceMethods for TextAnalysisSourceData<'_> {
 
 impl From<HRESULT> for Error {
     fn from(hresult: HRESULT) -> Self {
-        let message = format!("A DirectWrite rendering error occurred: {:#X}", hresult);
+        let message = format!("a DirectWrite rendering error occurred: {:X}", hresult);
         Error::PlatformError(message)
     }
 }
