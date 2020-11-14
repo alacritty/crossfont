@@ -99,7 +99,6 @@ impl DirectWriteRasterizer {
     }
 
     fn get_glyph_index(&self, face: &FontFace, character: char) -> u16 {
-        // DirectWrite returns 0 if the glyph does not exist in the font.
         face.get_glyph_indices(&[character as u32]).first().copied().unwrap_or(MISSING_GLYPH_INDEX)
     }
 
@@ -169,7 +168,7 @@ impl crate::Rasterize for DirectWriteRasterizer {
         let glyph_index = self.get_glyph_index(face, character);
 
         let glyph_metrics = face.get_design_glyph_metrics(&[glyph_index], false);
-        let hmetrics = glyph_metrics.first().ok_or(Error::MissingSizeMetrics)?;
+        let hmetrics = glyph_metrics.first().ok_or(Error::MetricsNotFont)?;
 
         let average_advance = f64::from(hmetrics.advanceWidth) * f64::from(scale);
 
@@ -231,17 +230,16 @@ impl crate::Rasterize for DirectWriteRasterizer {
     fn get_glyph(&mut self, glyph: GlyphKey) -> Result<RasterizedGlyph, Error> {
         let loaded_font = self.get_loaded_font(glyph.font_key)?;
 
-        let fallback_font;
+        let loaded_fallback_font;
+        let mut font = loaded_font;
         let mut glyph_index = self.get_glyph_index(&loaded_font.face, glyph.character);
-        let font = if glyph_index != MISSING_GLYPH_INDEX {
-            loaded_font
-        } else if let Some(font) = self.get_fallback_font(&loaded_font, glyph.character) {
-            fallback_font = Font::from(font);
-            glyph_index = self.get_glyph_index(&fallback_font.face, glyph.character);
-            &fallback_font
-        } else {
-            loaded_font
-        };
+        if glyph_index == MISSING_GLYPH_INDEX {
+            if let Some(fallback_font) = self.get_fallback_font(&loaded_font, glyph.character) {
+                loaded_fallback_font = Font::from(fallback_font);
+                glyph_index = self.get_glyph_index(&loaded_fallback_font.face, glyph.character);
+                font = &loaded_fallback_font;
+            }
+        }
 
         let rasterized_glyph =
             self.rasterize_glyph(&font.face, glyph.size, glyph.character, glyph_index)?;

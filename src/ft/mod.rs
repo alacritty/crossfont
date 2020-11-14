@@ -21,6 +21,8 @@ use super::{
     Slant, Style, Weight,
 };
 
+/// FreeType uses 0 for missing glyph
+/// https://freetype.org/freetype2/docs/reference/ft2-base_interface.html#ft_get_char_index
 const MISSING_GLYPH_INDEX: u32 = 0;
 
 struct FallbackFont {
@@ -287,7 +289,7 @@ impl FreeTypeRasterizer {
 
     fn full_metrics(&self, face_load_props: &FaceLoadingProperties) -> Result<FullMetrics, Error> {
         let ft_face = &face_load_props.ft_face;
-        let size_metrics = ft_face.size_metrics().ok_or(Error::MissingSizeMetrics)?;
+        let size_metrics = ft_face.size_metrics().ok_or(Error::MetricsNotFont)?;
 
         let width = match ft_face.load_char('0' as usize, face_load_props.load_flags) {
             Ok(_) => ft_face.glyph().metrics().horiAdvance / 64,
@@ -490,8 +492,7 @@ impl FreeTypeRasterizer {
                     Some(fixup_factor) => fixup_factor,
                     None => {
                         // Fallback if the user has bitmap scaling disabled.
-                        let metrics =
-                            face.ft_face.size_metrics().ok_or(Error::MissingSizeMetrics)?;
+                        let metrics = face.ft_face.size_metrics().ok_or(Error::MetricsNotFont)?;
                         f64::from(pixelsize) / f64::from(metrics.y_ppem)
                     },
                 };

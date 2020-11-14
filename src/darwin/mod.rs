@@ -117,7 +117,7 @@ impl crate::Rasterize for Rasterizer {
         // Get loaded font.
         let font = self.fonts.get(&glyph.font_key).ok_or(Error::UnknownFontKey)?;
 
-        // Find a font where the given char is present.
+        // Find a font where the given character is present.
         let (font, glyph_index) = iter::once(font)
             .chain(font.fallbacks.iter())
             .find_map(|font| match font.glyph_index(glyph.character) {
