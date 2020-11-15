@@ -209,7 +209,7 @@ pub enum Error {
     /// Unable to find a font matching the description.
     FontNotFound(FontDesc),
 
-    /// Unable to find metrics information on a font face.
+    /// Unable to find metrics for a font face.
     MetricsNotFont,
 
     /// The glyph could not be found in any font.
@@ -236,9 +236,7 @@ impl Display for Error {
                 write!(f, "glyph for character {:?} not found", glyph.character)
             },
             Error::UnknownFontKey => f.write_str("invalid font key"),
-            Error::MetricsNotFont => {
-                f.write_str("unable to find metrics information on a font face")
-            },
+            Error::MetricsNotFont => f.write_str("unable to find metrics for a font face"),
             Error::PlatformError(err) => write!(f, "{}", err),
         }
     }

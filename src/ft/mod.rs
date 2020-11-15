@@ -21,7 +21,7 @@ use super::{
     Slant, Style, Weight,
 };
 
-/// FreeType uses 0 for missing glyph
+/// FreeType uses 0 for the missing glyph:
 /// https://freetype.org/freetype2/docs/reference/ft2-base_interface.html#ft_get_char_index
 const MISSING_GLYPH_INDEX: u32 = 0;
 
