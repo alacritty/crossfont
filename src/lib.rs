@@ -236,7 +236,7 @@ impl Display for Error {
                 write!(f, "glyph for character {:?} not found", glyph.character)
             },
             Error::UnknownFontKey => f.write_str("invalid font key"),
-            Error::MetricsNotFont => f.write_str("unable to find metrics for a font face"),
+            Error::MetricsNotFont => f.write_str("metrics not found"),
             Error::PlatformError(err) => write!(f, "{}", err),
         }
     }
