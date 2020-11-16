@@ -168,7 +168,7 @@ impl crate::Rasterize for DirectWriteRasterizer {
         let glyph_index = self.get_glyph_index(face, character);
 
         let glyph_metrics = face.get_design_glyph_metrics(&[glyph_index], false);
-        let hmetrics = glyph_metrics.first().ok_or(Error::MetricsNotFont)?;
+        let hmetrics = glyph_metrics.first().ok_or(Error::MetricsNotFound)?;
 
         let average_advance = f64::from(hmetrics.advanceWidth) * f64::from(scale);
 

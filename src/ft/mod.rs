@@ -289,7 +289,7 @@ impl FreeTypeRasterizer {
 
     fn full_metrics(&self, face_load_props: &FaceLoadingProperties) -> Result<FullMetrics, Error> {
         let ft_face = &face_load_props.ft_face;
-        let size_metrics = ft_face.size_metrics().ok_or(Error::MetricsNotFont)?;
+        let size_metrics = ft_face.size_metrics().ok_or(Error::MetricsNotFound)?;
 
         let width = match ft_face.load_char('0' as usize, face_load_props.load_flags) {
             Ok(_) => ft_face.glyph().metrics().horiAdvance / 64,
@@ -409,7 +409,7 @@ impl FreeTypeRasterizer {
                     }
                 },
                 None => {
-                    if font_pattern.get_charset().map_or(false, |cs| cs.has_char(glyph.character)) {
+                    if !font_pattern.get_charset().map_or(false, |cs| cs.has_char(glyph.character)) {
                         continue;
                     }
 
@@ -492,7 +492,7 @@ impl FreeTypeRasterizer {
                     Some(fixup_factor) => fixup_factor,
                     None => {
                         // Fallback if the user has bitmap scaling disabled.
-                        let metrics = face.ft_face.size_metrics().ok_or(Error::MetricsNotFont)?;
+                        let metrics = face.ft_face.size_metrics().ok_or(Error::MetricsNotFound)?;
                         f64::from(pixelsize) / f64::from(metrics.y_ppem)
                     },
                 };
