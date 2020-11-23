@@ -6,7 +6,7 @@
 
 #![deny(clippy::all, clippy::if_not_else, clippy::enum_glob_use, clippy::wrong_pub_self_convention)]
 
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::ops::{Add, Mul};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -14,12 +14,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(not(any(target_os = "macos", windows)))]
 pub mod ft;
 #[cfg(not(any(target_os = "macos", windows)))]
-pub use ft::{Error, FreeTypeRasterizer as Rasterizer};
+pub use ft::FreeTypeRasterizer as Rasterizer;
 
 #[cfg(windows)]
 pub mod directwrite;
 #[cfg(windows)]
-pub use directwrite::{DirectWriteRasterizer as Rasterizer, Error};
+pub use directwrite::DirectWriteRasterizer as Rasterizer;
 
 // If target is macos, reexport everything from darwin.
 #[cfg(target_os = "macos")]
@@ -98,7 +98,7 @@ impl FontKey {
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct GlyphKey {
-    pub c: char,
+    pub character: char,
     pub font_key: FontKey,
     pub size: Size,
 }
@@ -149,12 +149,12 @@ impl From<f32> for Size {
 
 #[derive(Clone)]
 pub struct RasterizedGlyph {
-    pub c: char,
+    pub character: char,
     pub width: i32,
     pub height: i32,
     pub top: i32,
     pub left: i32,
-    pub buf: BitmapBuffer,
+    pub buffer: BitmapBuffer,
 }
 
 #[derive(Clone, Debug)]
@@ -169,12 +169,12 @@ pub enum BitmapBuffer {
 impl Default for RasterizedGlyph {
     fn default() -> RasterizedGlyph {
         RasterizedGlyph {
-            c: ' ',
+            character: ' ',
             width: 0,
             height: 0,
             top: 0,
             left: 0,
-            buf: BitmapBuffer::RGB(Vec::new()),
+            buffer: BitmapBuffer::RGB(Vec::new()),
         }
     }
 }
@@ -182,12 +182,12 @@ impl Default for RasterizedGlyph {
 impl fmt::Debug for RasterizedGlyph {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("RasterizedGlyph")
-            .field("c", &self.c)
+            .field("character", &self.character)
             .field("width", &self.width)
             .field("height", &self.height)
             .field("top", &self.top)
             .field("left", &self.left)
-            .field("buf", &self.buf)
+            .field("buffer", &self.buffer)
             .finish()
     }
 }
@@ -203,23 +203,59 @@ pub struct Metrics {
     pub strikeout_thickness: f32,
 }
 
-pub trait Rasterize {
-    /// Errors occurring in Rasterize methods.
-    type Err: ::std::error::Error + Send + Sync + 'static;
+/// Errors occuring when using the rasterizer.
+#[derive(Debug)]
+pub enum Error {
+    /// Unable to find a font matching the description.
+    FontNotFound(FontDesc),
 
+    /// Unable to find metrics for a font face.
+    MetricsNotFound,
+
+    /// The glyph could not be found in any font.
+    MissingGlyph(RasterizedGlyph),
+
+    /// Requested an operation with a FontKey that isn't known to the rasterizer.
+    UnknownFontKey,
+
+    /// Error from platfrom's font system.
+    PlatformError(String),
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::FontNotFound(font) => write!(f, "font {:?} not found", font),
+            Error::MissingGlyph(glyph) => {
+                write!(f, "glyph for character {:?} not found", glyph.character)
+            },
+            Error::UnknownFontKey => f.write_str("invalid font key"),
+            Error::MetricsNotFound => f.write_str("metrics not found"),
+            Error::PlatformError(err) => write!(f, "{}", err),
+        }
+    }
+}
+
+pub trait Rasterize {
     /// Create a new Rasterizer.
-    fn new(device_pixel_ratio: f32, use_thin_strokes: bool) -> Result<Self, Self::Err>
+    fn new(device_pixel_ratio: f32, use_thin_strokes: bool) -> Result<Self, Error>
     where
         Self: Sized;
 
     /// Get `Metrics` for the given `FontKey`.
-    fn metrics(&self, _: FontKey, _: Size) -> Result<Metrics, Self::Err>;
+    fn metrics(&self, _: FontKey, _: Size) -> Result<Metrics, Error>;
 
     /// Load the font described by `FontDesc` and `Size`.
-    fn load_font(&mut self, _: &FontDesc, _: Size) -> Result<FontKey, Self::Err>;
+    fn load_font(&mut self, _: &FontDesc, _: Size) -> Result<FontKey, Error>;
 
     /// Rasterize the glyph described by `GlyphKey`..
-    fn get_glyph(&mut self, _: GlyphKey) -> Result<RasterizedGlyph, Self::Err>;
+    fn get_glyph(&mut self, _: GlyphKey) -> Result<RasterizedGlyph, Error>;
 
     /// Update the Rasterizer's DPI factor.
     fn update_dpr(&mut self, device_pixel_ratio: f32);

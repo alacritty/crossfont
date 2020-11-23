@@ -3,7 +3,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::fmt::{self, Display, Formatter};
 use std::os::windows::ffi::OsStringExt;
 
 use dwrote::{
@@ -16,8 +15,13 @@ use winapi::um::dwrite;
 use winapi::um::winnls::GetUserDefaultLocaleName;
 
 use super::{
-    BitmapBuffer, FontDesc, FontKey, GlyphKey, Metrics, RasterizedGlyph, Size, Slant, Style, Weight,
+    BitmapBuffer, Error, FontDesc, FontKey, GlyphKey, Metrics, RasterizedGlyph, Size, Slant, Style,
+    Weight,
 };
+
+/// DirectWrite uses 0 for missing glyph symbols.
+/// https://docs.microsoft.com/en-us/typography/opentype/spec/recom#glyph-0-the-notdef-glyph
+const MISSING_GLYPH_INDEX: u16 = 0;
 
 /// Cached DirectWrite font.
 struct Font {
@@ -41,10 +45,9 @@ impl DirectWriteRasterizer {
         &self,
         face: &FontFace,
         size: Size,
-        c: char,
+        character: char,
+        glyph_index: u16,
     ) -> Result<RasterizedGlyph, Error> {
-        let glyph_index = self.get_glyph_index(face, c)?;
-
         let em_size = em_size(size);
 
         let glyph_run = DWRITE_GLYPH_RUN {
@@ -72,50 +75,41 @@ impl DirectWriteRasterizer {
             dwrote::DWRITE_MEASURING_MODE_NATURAL,
             0.0,
             0.0,
-        )
-        .map_err(Error::DirectWriteError)?;
+        )?;
 
-        let bounds = glyph_analysis
-            .get_alpha_texture_bounds(dwrote::DWRITE_TEXTURE_CLEARTYPE_3x1)
-            .map_err(Error::DirectWriteError)?;
+        let bounds =
+            glyph_analysis.get_alpha_texture_bounds(dwrote::DWRITE_TEXTURE_CLEARTYPE_3x1)?;
 
-        let buf = glyph_analysis
-            .create_alpha_texture(dwrote::DWRITE_TEXTURE_CLEARTYPE_3x1, bounds)
-            .map_err(Error::DirectWriteError)?;
+        let buffer = BitmapBuffer::RGB(
+            glyph_analysis.create_alpha_texture(dwrote::DWRITE_TEXTURE_CLEARTYPE_3x1, bounds)?,
+        );
 
         Ok(RasterizedGlyph {
-            c,
+            character,
             width: (bounds.right - bounds.left) as i32,
             height: (bounds.bottom - bounds.top) as i32,
             top: -bounds.top,
             left: bounds.left,
-            buf: BitmapBuffer::RGB(buf),
+            buffer,
         })
     }
 
     fn get_loaded_font(&self, font_key: FontKey) -> Result<&Font, Error> {
-        self.fonts.get(&font_key).ok_or(Error::FontNotLoaded)
+        self.fonts.get(&font_key).ok_or(Error::UnknownFontKey)
     }
 
-    fn get_glyph_index(&self, face: &FontFace, c: char) -> Result<u16, Error> {
-        let idx = *face
-            .get_glyph_indices(&[c as u32])
-            .first()
-            // DirectWrite returns 0 if the glyph does not exist in the font.
-            .filter(|glyph_index| **glyph_index != 0)
-            .ok_or_else(|| Error::MissingGlyph(c))?;
-
-        Ok(idx)
+    fn get_glyph_index(&self, face: &FontFace, character: char) -> u16 {
+        face.get_glyph_indices(&[character as u32]).first().copied().unwrap_or(MISSING_GLYPH_INDEX)
     }
 
-    fn get_fallback_font(&self, loaded_font: &Font, c: char) -> Option<dwrote::Font> {
+    fn get_fallback_font(&self, loaded_font: &Font, character: char) -> Option<dwrote::Font> {
         let fallback = self.fallback_sequence.as_ref()?;
 
-        let mut buf = [0u16; 2];
-        c.encode_utf16(&mut buf);
+        let mut buffer = [0u16; 2];
+        character.encode_utf16(&mut buffer);
 
-        let length = c.len_utf16() as u32;
-        let utf16_codepoints = &buf[..length as usize];
+        let length = character.len_utf16() as u32;
+        let utf16_codepoints = &buffer[..length as usize];
 
         let locale = get_current_locale();
 
@@ -141,8 +135,6 @@ impl DirectWriteRasterizer {
 }
 
 impl crate::Rasterize for DirectWriteRasterizer {
-    type Err = Error;
-
     fn new(device_pixel_ratio: f32, _: bool) -> Result<DirectWriteRasterizer, Error> {
         Ok(DirectWriteRasterizer {
             fonts: HashMap::new(),
@@ -172,11 +164,11 @@ impl crate::Rasterize for DirectWriteRasterizer {
         let line_height = f64::from(ascent - descent + line_gap);
 
         // Since all monospace characters have the same width, we use `!` for horizontal metrics.
-        let c = '!';
-        let glyph_index = self.get_glyph_index(face, c)?;
+        let character = '!';
+        let glyph_index = self.get_glyph_index(face, character);
 
         let glyph_metrics = face.get_design_glyph_metrics(&[glyph_index], false);
-        let hmetrics = glyph_metrics.first().ok_or_else(|| Error::MissingGlyph(c))?;
+        let hmetrics = glyph_metrics.first().ok_or(Error::MetricsNotFound)?;
 
         let average_advance = f64::from(hmetrics.advanceWidth) * f64::from(scale);
 
@@ -200,7 +192,7 @@ impl crate::Rasterize for DirectWriteRasterizer {
         let family = self
             .available_fonts
             .get_font_family_by_name(&desc.name)
-            .ok_or_else(|| Error::MissingFont(desc.clone()))?;
+            .ok_or_else(|| Error::FontNotFound(desc.clone()))?;
 
         let font = match desc.style {
             Style::Description { weight, slant } => {
@@ -214,7 +206,7 @@ impl crate::Rasterize for DirectWriteRasterizer {
 
                 loop {
                     if idx == count {
-                        break Err(Error::MissingFont(desc.clone()));
+                        break Err(Error::FontNotFound(desc.clone()));
                     }
 
                     let font = family.get_font(idx);
@@ -238,40 +230,29 @@ impl crate::Rasterize for DirectWriteRasterizer {
     fn get_glyph(&mut self, glyph: GlyphKey) -> Result<RasterizedGlyph, Error> {
         let loaded_font = self.get_loaded_font(glyph.font_key)?;
 
-        match self.rasterize_glyph(&loaded_font.face, glyph.size, glyph.c) {
-            Err(err @ Error::MissingGlyph(_)) => {
-                let fallback_font = self.get_fallback_font(&loaded_font, glyph.c).ok_or(err)?;
-                self.rasterize_glyph(&fallback_font.create_font_face(), glyph.size, glyph.c)
-            },
-            result => result,
+        let loaded_fallback_font;
+        let mut font = loaded_font;
+        let mut glyph_index = self.get_glyph_index(&loaded_font.face, glyph.character);
+        if glyph_index == MISSING_GLYPH_INDEX {
+            if let Some(fallback_font) = self.get_fallback_font(&loaded_font, glyph.character) {
+                loaded_fallback_font = Font::from(fallback_font);
+                glyph_index = self.get_glyph_index(&loaded_fallback_font.face, glyph.character);
+                font = &loaded_fallback_font;
+            }
+        }
+
+        let rasterized_glyph =
+            self.rasterize_glyph(&font.face, glyph.size, glyph.character, glyph_index)?;
+
+        if glyph_index == MISSING_GLYPH_INDEX {
+            Err(Error::MissingGlyph(rasterized_glyph))
+        } else {
+            Ok(rasterized_glyph)
         }
     }
 
     fn update_dpr(&mut self, device_pixel_ratio: f32) {
         self.device_pixel_ratio = device_pixel_ratio;
-    }
-}
-
-#[derive(Debug)]
-pub enum Error {
-    MissingFont(FontDesc),
-    MissingGlyph(char),
-    FontNotLoaded,
-    DirectWriteError(HRESULT),
-}
-
-impl std::error::Error for Error {}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            Error::MissingGlyph(c) => write!(f, "Glyph not found for char {:?}", c),
-            Error::MissingFont(desc) => write!(f, "Unable to find the font {}", desc),
-            Error::FontNotLoaded => f.write_str("Tried to use a font that hasn't been loaded"),
-            Error::DirectWriteError(hresult) => {
-                write!(f, "A DirectWrite rendering error occurred: {:#X}", hresult)
-            },
-        }
     }
 }
 
@@ -311,11 +292,12 @@ impl From<Slant> for FontStyle {
 }
 
 fn get_current_locale() -> String {
-    let mut buf = vec![0u16; LOCALE_NAME_MAX_LENGTH];
-    let len = unsafe { GetUserDefaultLocaleName(buf.as_mut_ptr(), buf.len() as i32) as usize };
+    let mut buffer = vec![0u16; LOCALE_NAME_MAX_LENGTH];
+    let len =
+        unsafe { GetUserDefaultLocaleName(buffer.as_mut_ptr(), buffer.len() as i32) as usize };
 
     // `len` includes null byte, which we don't need in Rust.
-    OsString::from_wide(&buf[..len - 1]).into_string().expect("Locale not valid unicode")
+    OsString::from_wide(&buffer[..len - 1]).into_string().expect("Locale not valid unicode")
 }
 
 /// Font fallback information for dwrote's TextAnalysisSource.
@@ -331,5 +313,12 @@ impl TextAnalysisSourceMethods for TextAnalysisSourceData<'_> {
 
     fn get_paragraph_reading_direction(&self) -> dwrite::DWRITE_READING_DIRECTION {
         dwrite::DWRITE_READING_DIRECTION_LEFT_TO_RIGHT
+    }
+}
+
+impl From<HRESULT> for Error {
+    fn from(hresult: HRESULT) -> Self {
+        let message = format!("a DirectWrite rendering error occurred: {:X}", hresult);
+        Error::PlatformError(message)
     }
 }
