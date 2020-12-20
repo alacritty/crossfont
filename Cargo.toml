@@ -12,7 +12,6 @@ keywords = ["font"]
 edition = "2018"
 
 [dependencies]
-euclid = "0.22"
 libc = "0.2"
 foreign-types = "0.5"
 log = "0.4"
