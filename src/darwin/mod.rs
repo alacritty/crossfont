@@ -29,8 +29,6 @@ use core_text::font_descriptor::{CTFontDescriptor, CTFontOrientation};
 use cocoa::base::{id, nil, NO};
 use cocoa::foundation::{NSOperatingSystemVersion, NSProcessInfo, NSString, NSUserDefaults};
 
-use euclid::{Point2D, Rect, Size2D};
-
 use log::{trace, warn};
 
 pub mod byte_order;
@@ -69,6 +67,54 @@ impl Descriptor {
             font_path: desc.font_path().unwrap_or_else(PathBuf::new),
             ct_descriptor: desc,
         }
+    }
+
+    /// Create a Font from this descriptor.
+    pub fn to_font(&self, size: f64, load_fallbacks: bool) -> Font {
+        let ct_font = ct_new_from_descriptor(&self.ct_descriptor, size);
+        let cg_font = ct_font.copy_to_CGFont();
+
+        let fallbacks = if load_fallbacks {
+            descriptors_for_family("Menlo")
+                .into_iter()
+                .find(|d| d.font_name == "Menlo-Regular")
+                .map(|descriptor| {
+                    let menlo = ct_new_from_descriptor(&descriptor.ct_descriptor, size);
+
+                    // TODO fixme, hardcoded en for english.
+                    let mut fallbacks = cascade_list_for_languages(&menlo, &["en".to_owned()])
+                        .into_iter()
+                        .filter(|desc| !desc.font_path.as_os_str().is_empty())
+                        .map(|desc| desc.to_font(size, false))
+                        .collect::<Vec<_>>();
+
+                    // TODO, we can't use apple's proposed
+                    // .Apple Symbol Fallback (filtered out below),
+                    // but not having these makes us not able to render
+                    // many chars. We add the symbols back in.
+                    // Investigate if we can actually use the .-prefixed
+                    // fallbacks somehow.
+                    if let Some(descriptor) =
+                        descriptors_for_family("Apple Symbols").into_iter().next()
+                    {
+                        fallbacks.push(descriptor.to_font(size, false))
+                    };
+
+                    // Include Menlo in the fallback list as well.
+                    fallbacks.insert(0, Font {
+                        cg_font: menlo.copy_to_CGFont(),
+                        ct_font: menlo,
+                        fallbacks: Vec::new(),
+                    });
+
+                    fallbacks
+                })
+                .unwrap_or_else(Vec::new)
+        } else {
+            Vec::new()
+        };
+
+        Font { ct_font, cg_font, fallbacks }
     }
 }
 
@@ -207,16 +253,6 @@ impl Default for FontOrientation {
     }
 }
 
-/// A font.
-#[derive(Clone)]
-pub struct Font {
-    ct_font: CTFont,
-    cg_font: CGFont,
-    fallbacks: Vec<Font>,
-}
-
-unsafe impl Send for Font {}
-
 /// Set subpixel anti-aliasing on macOS.
 ///
 /// Sub-pixel anti-aliasing has been disabled since macOS Mojave by default. This function allows
@@ -292,73 +328,17 @@ pub fn descriptors_for_family(family: &str) -> Vec<Descriptor> {
     out
 }
 
-impl Descriptor {
-    /// Create a Font from this descriptor.
-    pub fn to_font(&self, size: f64, load_fallbacks: bool) -> Font {
-        let ct_font = ct_new_from_descriptor(&self.ct_descriptor, size);
-        let cg_font = ct_font.copy_to_CGFont();
-
-        let fallbacks = if load_fallbacks {
-            descriptors_for_family("Menlo")
-                .into_iter()
-                .find(|d| d.font_name == "Menlo-Regular")
-                .map(|descriptor| {
-                    let menlo = ct_new_from_descriptor(&descriptor.ct_descriptor, size);
-
-                    // TODO fixme, hardcoded en for english.
-                    let mut fallbacks = cascade_list_for_languages(&menlo, &["en".to_owned()])
-                        .into_iter()
-                        .filter(|desc| !desc.font_path.as_os_str().is_empty())
-                        .map(|desc| desc.to_font(size, false))
-                        .collect::<Vec<_>>();
-
-                    // TODO, we can't use apple's proposed
-                    // .Apple Symbol Fallback (filtered out below),
-                    // but not having these makes us not able to render
-                    // many chars. We add the symbols back in.
-                    // Investigate if we can actually use the .-prefixed
-                    // fallbacks somehow.
-                    if let Some(descriptor) =
-                        descriptors_for_family("Apple Symbols").into_iter().next()
-                    {
-                        fallbacks.push(descriptor.to_font(size, false))
-                    };
-
-                    // Include Menlo in the fallback list as well.
-                    fallbacks.insert(0, Font {
-                        cg_font: menlo.copy_to_CGFont(),
-                        ct_font: menlo,
-                        fallbacks: Vec::new(),
-                    });
-
-                    fallbacks
-                })
-                .unwrap_or_else(Vec::new)
-        } else {
-            Vec::new()
-        };
-
-        Font { ct_font, cg_font, fallbacks }
-    }
+/// A font.
+#[derive(Clone)]
+pub struct Font {
+    ct_font: CTFont,
+    cg_font: CGFont,
+    fallbacks: Vec<Font>,
 }
 
+unsafe impl Send for Font {}
+
 impl Font {
-    /// The the bounding rect of a glyph.
-    pub fn bounding_rect_for_glyph(
-        &self,
-        orientation: FontOrientation,
-        index: u32,
-    ) -> Rect<f64, ()> {
-        let cg_rect = self
-            .ct_font
-            .get_bounding_rects_for_glyphs(orientation as CTFontOrientation, &[index as CGGlyph]);
-
-        Rect::new(
-            Point2D::new(cg_rect.origin.x, cg_rect.origin.y),
-            Size2D::new(cg_rect.size.width, cg_rect.size.height),
-        )
-    }
-
     pub fn metrics(&self) -> Metrics {
         let average_advance = self.glyph_advance('0');
 
@@ -418,7 +398,9 @@ impl Font {
         glyph_index: u32,
         use_thin_strokes: bool,
     ) -> RasterizedGlyph {
-        let bounds = self.bounding_rect_for_glyph(Default::default(), glyph_index);
+        let bounds = self
+            .ct_font
+            .get_bounding_rects_for_glyphs(CTFontOrientation::default(), &[glyph_index as CGGlyph]);
 
         let rasterized_left = bounds.origin.x.floor() as i32;
         let rasterized_width =
