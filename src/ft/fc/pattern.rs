@@ -103,7 +103,7 @@ impl<'a> IntPropertyIter<'a> {
     }
 
     fn get_value(&self, index: usize) -> Option<isize> {
-        let mut value = 0 as c_int;
+        let mut value: c_int = 0;
 
         let result = unsafe {
             FcPatternGetInteger(
@@ -348,12 +348,12 @@ macro_rules! string_accessor {
 pub struct PatternHash(pub u32);
 
 #[derive(Hash, Eq, PartialEq, Debug)]
-pub struct FTFaceLocation {
+pub struct FtFaceLocation {
     pub path: PathBuf,
     pub index: isize,
 }
 
-impl FTFaceLocation {
+impl FtFaceLocation {
     pub fn new(path: PathBuf, index: isize) -> Self {
         Self { path, index }
     }
@@ -606,9 +606,9 @@ impl PatternRef {
         unsafe { self.get_string(b"file\0").nth(index) }.map(From::from)
     }
 
-    pub fn ft_face_location(&self, index: usize) -> Option<FTFaceLocation> {
+    pub fn ft_face_location(&self, index: usize) -> Option<FtFaceLocation> {
         match (self.file(index), self.index().next()) {
-            (Some(path), Some(index)) => Some(FTFaceLocation::new(path, index)),
+            (Some(path), Some(index)) => Some(FtFaceLocation::new(path, index)),
             _ => None,
         }
     }

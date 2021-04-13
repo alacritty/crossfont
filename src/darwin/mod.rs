@@ -416,7 +416,7 @@ impl Font {
                 height: 0,
                 top: 0,
                 left: 0,
-                buffer: BitmapBuffer::RGB(Vec::new()),
+                buffer: BitmapBuffer::Rgb(Vec::new()),
             };
         }
 
@@ -470,9 +470,9 @@ impl Font {
         let rasterized_pixels = cg_context.data().to_vec();
 
         let buffer = if is_colored {
-            BitmapBuffer::RGBA(byte_order::extract_rgba(&rasterized_pixels))
+            BitmapBuffer::Rgba(byte_order::extract_rgba(&rasterized_pixels))
         } else {
-            BitmapBuffer::RGB(byte_order::extract_rgb(&rasterized_pixels))
+            BitmapBuffer::Rgb(byte_order::extract_rgb(&rasterized_pixels))
         };
 
         RasterizedGlyph {
@@ -542,7 +542,7 @@ mod tests {
                 let glyph = font.get_glyph(*character, glyph_index, false);
 
                 let buffer = match &glyph.buffer {
-                    BitmapBuffer::RGB(buffer) | BitmapBuffer::RGBA(buffer) => buffer,
+                    BitmapBuffer::Rgb(buffer) | BitmapBuffer::Rgba(buffer) => buffer,
                 };
 
                 // Debug the glyph.. sigh.

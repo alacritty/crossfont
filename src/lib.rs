@@ -160,10 +160,10 @@ pub struct RasterizedGlyph {
 #[derive(Clone, Debug)]
 pub enum BitmapBuffer {
     /// RGB alphamask.
-    RGB(Vec<u8>),
+    Rgb(Vec<u8>),
 
     /// RGBA pixels with premultiplied alpha.
-    RGBA(Vec<u8>),
+    Rgba(Vec<u8>),
 }
 
 impl Default for RasterizedGlyph {
@@ -174,7 +174,7 @@ impl Default for RasterizedGlyph {
             height: 0,
             top: 0,
             left: 0,
-            buffer: BitmapBuffer::RGB(Vec::new()),
+            buffer: BitmapBuffer::Rgb(Vec::new()),
         }
     }
 }
