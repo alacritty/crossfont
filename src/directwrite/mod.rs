@@ -80,7 +80,7 @@ impl DirectWriteRasterizer {
         let bounds =
             glyph_analysis.get_alpha_texture_bounds(dwrote::DWRITE_TEXTURE_CLEARTYPE_3x1)?;
 
-        let buffer = BitmapBuffer::RGB(
+        let buffer = BitmapBuffer::Rgb(
             glyph_analysis.create_alpha_texture(dwrote::DWRITE_TEXTURE_CLEARTYPE_3x1, bounds)?,
         );
 

@@ -8,13 +8,13 @@ use std::rc::Rc;
 use freetype::face::LoadFlag;
 use freetype::tt_os2::TrueTypeOS2Table;
 use freetype::{self, Library, Matrix};
-use freetype::{freetype_sys, Face as FTFace};
+use freetype::{freetype_sys, Face as FtFace};
 use libc::{c_long, c_uint};
 use log::{debug, trace};
 
 pub mod fc;
 
-use fc::{CharSet, FTFaceLocation, Pattern, PatternHash, PatternRef, Rgba};
+use fc::{CharSet, FtFaceLocation, Pattern, PatternHash, PatternRef, Rgba};
 
 use super::{
     BitmapBuffer, Error, FontDesc, FontKey, GlyphKey, Metrics, Rasterize, RasterizedGlyph, Size,
@@ -58,7 +58,7 @@ struct FaceLoadingProperties {
     embolden: bool,
     matrix: Option<Matrix>,
     pixelsize_fixup_factor: Option<f64>,
-    ft_face: Rc<FTFace>,
+    ft_face: Rc<FtFace>,
     rgba: Rgba,
 }
 
@@ -84,7 +84,7 @@ impl fmt::Debug for FaceLoadingProperties {
 pub struct FreeTypeRasterizer {
     library: Library,
     faces: HashMap<FontKey, FaceLoadingProperties>,
-    ft_faces: HashMap<FTFaceLocation, Rc<FTFace>>,
+    ft_faces: HashMap<FtFaceLocation, Rc<FtFace>>,
     fallback_lists: HashMap<FontKey, FallbackList>,
     device_pixel_ratio: f32,
 }
@@ -176,16 +176,9 @@ impl Rasterize for FreeTypeRasterizer {
     }
 }
 
-pub trait IntoFontconfigType {
-    type FcType;
-    fn into_fontconfig_type(&self) -> Self::FcType;
-}
-
-impl IntoFontconfigType for Slant {
-    type FcType = fc::Slant;
-
-    fn into_fontconfig_type(&self) -> Self::FcType {
-        match *self {
+impl From<Slant> for fc::Slant {
+    fn from(slant: Slant) -> Self {
+        match slant {
             Slant::Normal => fc::Slant::Roman,
             Slant::Italic => fc::Slant::Italic,
             Slant::Oblique => fc::Slant::Oblique,
@@ -193,11 +186,9 @@ impl IntoFontconfigType for Slant {
     }
 }
 
-impl IntoFontconfigType for Weight {
-    type FcType = fc::Weight;
-
-    fn into_fontconfig_type(&self) -> Self::FcType {
-        match *self {
+impl From<Weight> for fc::Weight {
+    fn from(weight: Weight) -> Self {
+        match weight {
             Weight::Normal => fc::Weight::Regular,
             Weight::Bold => fc::Weight::Bold,
         }
@@ -224,8 +215,8 @@ impl FreeTypeRasterizer {
         match desc.style {
             Style::Description { slant, weight } => {
                 // Match nearest font.
-                pattern.set_weight(weight.into_fontconfig_type());
-                pattern.set_slant(slant.into_fontconfig_type());
+                pattern.set_weight(weight.into());
+                pattern.set_slant(slant.into());
             },
             Style::Specific(ref style) => {
                 // If a name was specified, try and load specifically that font.
@@ -276,7 +267,7 @@ impl FreeTypeRasterizer {
                 let fallback_font = pattern.render_prepare(config, fallback_font);
                 let fallback_font_key = FontKey::from_pattern_hashes(hash, fallback_font.hash());
 
-                let _ = coverage.merge(&charset);
+                coverage.merge(&charset);
 
                 FallbackFont::new(fallback_font, fallback_font_key)
             })
@@ -299,7 +290,7 @@ impl FreeTypeRasterizer {
         Ok(FullMetrics { size_metrics, cell_width: width })
     }
 
-    fn load_ft_face(&mut self, ft_face_location: FTFaceLocation) -> Result<Rc<FTFace>, Error> {
+    fn load_ft_face(&mut self, ft_face_location: FtFaceLocation) -> Result<Rc<FtFace>, Error> {
         let mut ft_face = self.library.new_face(&ft_face_location.path, ft_face_location.index)?;
         if ft_face.has_color() {
             unsafe {
@@ -376,16 +367,16 @@ impl FreeTypeRasterizer {
         }
     }
 
-    fn face_for_glyph(&mut self, glyph_key: GlyphKey) -> Result<FontKey, Error> {
+    fn face_for_glyph(&mut self, glyph_key: GlyphKey) -> FontKey {
         if let Some(face) = self.faces.get(&glyph_key.font_key) {
             let index = face.ft_face.get_char_index(glyph_key.character as usize);
 
             if index != 0 {
-                return Ok(glyph_key.font_key);
+                return glyph_key.font_key;
             }
         }
 
-        Ok(self.load_face_with_glyph(glyph_key).unwrap_or(glyph_key.font_key))
+        self.load_face_with_glyph(glyph_key).unwrap_or(glyph_key.font_key)
     }
 
     fn load_face_with_glyph(&mut self, glyph: GlyphKey) -> Result<FontKey, Error> {
@@ -428,7 +419,7 @@ impl FreeTypeRasterizer {
 
     fn get_rendered_glyph(&mut self, glyph_key: GlyphKey) -> Result<RasterizedGlyph, Error> {
         // Render a normal character if it's not a cursor.
-        let font_key = self.face_for_glyph(glyph_key)?;
+        let font_key = self.face_for_glyph(glyph_key);
         let face = &self.faces[&font_key];
         let index = face.ft_face.get_char_index(glyph_key.character as usize) as u32;
         let pixelsize = face
@@ -622,7 +613,7 @@ impl FreeTypeRasterizer {
                         _ => packed.extend_from_slice(&buf[start..stop]),
                     }
                 }
-                Ok((bitmap.rows(), bitmap.width() / 3, BitmapBuffer::RGB(packed)))
+                Ok((bitmap.rows(), bitmap.width() / 3, BitmapBuffer::Rgb(packed)))
             },
             PixelMode::LcdV => {
                 for i in 0..bitmap.rows() / 3 {
@@ -637,7 +628,7 @@ impl FreeTypeRasterizer {
                         }
                     }
                 }
-                Ok((bitmap.rows() / 3, bitmap.width(), BitmapBuffer::RGB(packed)))
+                Ok((bitmap.rows() / 3, bitmap.width(), BitmapBuffer::Rgb(packed)))
             },
             // Mono data is stored in a packed format using 1 bit per pixel.
             PixelMode::Mono => {
@@ -654,7 +645,7 @@ impl FreeTypeRasterizer {
                         count -= 1;
                         bit -= 1;
                     }
-                };
+                }
 
                 for i in 0..(bitmap.rows() as usize) {
                     let mut columns = bitmap.width();
@@ -668,7 +659,7 @@ impl FreeTypeRasterizer {
                         byte += 1;
                     }
                 }
-                Ok((bitmap.rows(), bitmap.width(), BitmapBuffer::RGB(packed)))
+                Ok((bitmap.rows(), bitmap.width(), BitmapBuffer::Rgb(packed)))
             },
             // Gray data is stored as a value between 0 and 255 using 1 byte per pixel.
             PixelMode::Gray => {
@@ -681,7 +672,7 @@ impl FreeTypeRasterizer {
                         packed.push(*byte);
                     }
                 }
-                Ok((bitmap.rows(), bitmap.width(), BitmapBuffer::RGB(packed)))
+                Ok((bitmap.rows(), bitmap.width(), BitmapBuffer::Rgb(packed)))
             },
             PixelMode::Bgra => {
                 let buf_size = (bitmap.rows() * bitmap.width() * 4) as usize;
@@ -693,7 +684,7 @@ impl FreeTypeRasterizer {
                     packed.push(buf[i + 3]);
                     i += 4;
                 }
-                Ok((bitmap.rows(), bitmap.width(), BitmapBuffer::RGBA(packed)))
+                Ok((bitmap.rows(), bitmap.width(), BitmapBuffer::Rgba(packed)))
             },
             mode => panic!("unhandled pixel mode: {:?}", mode),
         }
@@ -707,7 +698,7 @@ impl FreeTypeRasterizer {
 fn downsample_bitmap(mut bitmap_glyph: RasterizedGlyph, fixup_factor: f64) -> RasterizedGlyph {
     // Only scale colored buffers which are bigger than required.
     let bitmap_buffer = match (&bitmap_glyph.buffer, fixup_factor.partial_cmp(&1.0)) {
-        (BitmapBuffer::RGBA(buffer), Some(Ordering::Less)) => buffer,
+        (BitmapBuffer::Rgba(buffer), Some(Ordering::Less)) => buffer,
         _ => return bitmap_glyph,
     };
 
@@ -760,7 +751,7 @@ fn downsample_bitmap(mut bitmap_glyph: RasterizedGlyph, fixup_factor: f64) -> Ra
         }
     }
 
-    bitmap_glyph.buffer = BitmapBuffer::RGBA(downsampled_buffer);
+    bitmap_glyph.buffer = BitmapBuffer::Rgba(downsampled_buffer);
 
     // Downscale the metrics.
     bitmap_glyph.top = (f64::from(bitmap_glyph.top) * fixup_factor) as i32;
