@@ -409,9 +409,9 @@ impl FreeTypeRasterizer {
                     }
 
                     let pattern = font_pattern.clone();
-                    let key = self.face_from_pattern(&pattern, font_key)?.unwrap();
-
-                    return Ok(key);
+                    return self
+                        .face_from_pattern(&pattern, font_key)?
+                        .ok_or(Error::FontFaceLocationNotFound);
                 },
             }
         }

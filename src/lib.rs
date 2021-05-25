@@ -220,6 +220,9 @@ pub enum Error {
 
     /// Error from platfrom's font system.
     PlatformError(String),
+
+    /// The font face location could not be found.
+    FontFaceLocationNotFound,
 }
 
 impl std::error::Error for Error {
@@ -238,6 +241,7 @@ impl Display for Error {
             Error::UnknownFontKey => f.write_str("invalid font key"),
             Error::MetricsNotFound => f.write_str("metrics not found"),
             Error::PlatformError(err) => write!(f, "{}", err),
+            Error::FontFaceLocationNotFound => f.write_str("font face location not found"),
         }
     }
 }
