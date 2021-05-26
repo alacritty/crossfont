@@ -25,6 +25,7 @@ use super::{
 /// https://freetype.org/freetype2/docs/reference/ft2-base_interface.html#ft_get_char_index
 const MISSING_GLYPH_INDEX: u32 = 0;
 
+#[derive(Clone)]
 struct FallbackFont {
     pattern: Pattern,
     key: FontKey,
@@ -390,7 +391,7 @@ impl FreeTypeRasterizer {
             return Ok(glyph.font_key);
         }
 
-        for fallback_font in &fallback_list.list {
+        for fallback_font in &fallback_list.list.clone() {
             let font_key = fallback_font.key;
             let font_pattern = &fallback_font.pattern;
             match self.faces.get(&font_key) {
@@ -409,9 +410,11 @@ impl FreeTypeRasterizer {
                     }
 
                     let pattern = font_pattern.clone();
-                    return self
-                        .face_from_pattern(&pattern, font_key)?
-                        .ok_or(Error::FontFaceLocationNotFound);
+                    if let Some(key) = self.face_from_pattern(&pattern, font_key)? {
+                        return Ok(key);
+                    } else {
+                        continue;
+                    }
                 },
             }
         }
