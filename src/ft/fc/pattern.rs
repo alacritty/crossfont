@@ -49,11 +49,7 @@ impl<'a> StringPropertyIter<'a> {
             //
             // Potential unsafety? What happens if the pattern is modified while this ptr is
             // borrowed out?
-            unsafe {
-                CStr::from_ptr(value as *const c_char)
-                    .to_str()
-                    .map_or(None, |x| Some(mem::transmute(x)))
-            }
+            unsafe { mem::transmute(CStr::from_ptr(value as *const c_char).to_str().ok()?) }
         } else {
             None
         }
