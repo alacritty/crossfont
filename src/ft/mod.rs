@@ -25,7 +25,6 @@ use super::{
 /// https://freetype.org/freetype2/docs/reference/ft2-base_interface.html#ft_get_char_index
 const MISSING_GLYPH_INDEX: u32 = 0;
 
-#[derive(Clone)]
 struct FallbackFont {
     pattern: Pattern,
     key: FontKey,
@@ -83,9 +82,7 @@ impl fmt::Debug for FaceLoadingProperties {
 
 /// Rasterizes glyphs for a single font face.
 pub struct FreeTypeRasterizer {
-    library: Library,
-    faces: HashMap<FontKey, FaceLoadingProperties>,
-    ft_faces: HashMap<FtFaceLocation, Rc<FtFace>>,
+    free_type_loader: FreeTypeLoader,
     fallback_lists: HashMap<FontKey, FallbackList>,
     device_pixel_ratio: f32,
 }
@@ -102,25 +99,15 @@ fn to_fixedpoint_16_6(f: f64) -> c_long {
 
 impl Rasterize for FreeTypeRasterizer {
     fn new(device_pixel_ratio: f32, _: bool) -> Result<FreeTypeRasterizer, Error> {
-        let library = Library::init()?;
-
-        #[cfg(ft_set_default_properties_available)]
-        unsafe {
-            // Initialize default properties, like user preferred interpreter.
-            freetype_sys::FT_Set_Default_Properties(library.raw());
-        };
-
         Ok(FreeTypeRasterizer {
-            faces: HashMap::new(),
-            ft_faces: HashMap::new(),
+            free_type_loader: FreeTypeLoader::new()?,
             fallback_lists: HashMap::new(),
-            library,
             device_pixel_ratio,
         })
     }
 
     fn metrics(&self, key: FontKey, _size: Size) -> Result<Metrics, Error> {
-        let face = &mut self.faces.get(&key).ok_or(Error::UnknownFontKey)?;
+        let face = &mut self.free_type_loader.faces.get(&key).ok_or(Error::UnknownFontKey)?;
         let full = self.full_metrics(&face)?;
 
         let ascent = (full.size_metrics.ascender / 64) as f32;
@@ -254,8 +241,9 @@ impl FreeTypeRasterizer {
         }
 
         // Load font if we haven't loaded it yet.
-        if !self.faces.contains_key(&primary_font_key) {
-            self.face_from_pattern(&primary_font, primary_font_key)
+        if !self.free_type_loader.faces.contains_key(&primary_font_key) {
+            self.free_type_loader
+                .face_from_pattern(&primary_font, primary_font_key)
                 .and_then(|pattern| pattern.ok_or_else(|| Error::FontNotFound(desc.to_owned())))?;
         }
 
@@ -294,85 +282,8 @@ impl FreeTypeRasterizer {
         Ok(FullMetrics { size_metrics, cell_width: width })
     }
 
-    fn load_ft_face(&mut self, ft_face_location: FtFaceLocation) -> Result<Rc<FtFace>, Error> {
-        let mut ft_face = self.library.new_face(&ft_face_location.path, ft_face_location.index)?;
-        if ft_face.has_color() {
-            unsafe {
-                // Select the colored bitmap size to use from the array of available sizes.
-                freetype_sys::FT_Select_Size(ft_face.raw_mut(), 0);
-            }
-        }
-
-        let ft_face = Rc::new(ft_face);
-        self.ft_faces.insert(ft_face_location, Rc::clone(&ft_face));
-
-        Ok(ft_face)
-    }
-
-    fn face_from_pattern(
-        &mut self,
-        pattern: &PatternRef,
-        font_key: FontKey,
-    ) -> Result<Option<FontKey>, Error> {
-        if let Some(ft_face_location) = pattern.ft_face_location(0) {
-            if self.faces.get(&font_key).is_some() {
-                return Ok(Some(font_key));
-            }
-
-            trace!("Got font path={:?}, index={:?}", ft_face_location.path, ft_face_location.index);
-
-            let ft_face = match self.ft_faces.get(&ft_face_location) {
-                Some(ft_face) => Rc::clone(ft_face),
-                None => self.load_ft_face(ft_face_location)?,
-            };
-
-            let non_scalable = if pattern.scalable().next().unwrap_or(true) {
-                None
-            } else {
-                Some(pattern.pixelsize().next().expect("has 1+ pixelsize") as f32)
-            };
-
-            let embolden = pattern.embolden().next().unwrap_or(false);
-
-            let matrix = pattern.get_matrix().map(|matrix| {
-                // Convert Fontconfig matrix to FreeType matrix.
-                let xx = to_fixedpoint_16_6(matrix.xx);
-                let xy = to_fixedpoint_16_6(matrix.xy);
-                let yx = to_fixedpoint_16_6(matrix.yx);
-                let yy = to_fixedpoint_16_6(matrix.yy);
-
-                Matrix { xx, xy, yx, yy }
-            });
-
-            let pixelsize_fixup_factor = pattern.pixelsizefixupfactor().next();
-
-            let rgba = pattern.rgba().next().unwrap_or(Rgba::Unknown);
-
-            let face = FaceLoadingProperties {
-                load_flags: Self::ft_load_flags(pattern),
-                render_mode: Self::ft_render_mode(pattern),
-                lcd_filter: Self::ft_lcd_filter(pattern),
-                non_scalable,
-                colored: ft_face.has_color(),
-                embolden,
-                matrix,
-                pixelsize_fixup_factor,
-                ft_face,
-                rgba,
-            };
-
-            debug!("Loaded Face {:?}", face);
-
-            self.faces.insert(font_key, face);
-
-            Ok(Some(font_key))
-        } else {
-            Ok(None)
-        }
-    }
-
     fn face_for_glyph(&mut self, glyph_key: GlyphKey) -> FontKey {
-        if let Some(face) = self.faces.get(&glyph_key.font_key) {
+        if let Some(face) = self.free_type_loader.faces.get(&glyph_key.font_key) {
             let index = face.ft_face.get_char_index(glyph_key.character as usize);
 
             if index != 0 {
@@ -391,10 +302,10 @@ impl FreeTypeRasterizer {
             return Ok(glyph.font_key);
         }
 
-        for fallback_font in &fallback_list.list.clone() {
+        for fallback_font in &fallback_list.list {
             let font_key = fallback_font.key;
             let font_pattern = &fallback_font.pattern;
-            match self.faces.get(&font_key) {
+            match self.free_type_loader.faces.get(&font_key) {
                 Some(face) => {
                     let index = face.ft_face.get_char_index(glyph.character as usize);
 
@@ -410,7 +321,9 @@ impl FreeTypeRasterizer {
                     }
 
                     let pattern = font_pattern.clone();
-                    if let Some(key) = self.face_from_pattern(&pattern, font_key)? {
+                    if let Some(key) =
+                        self.free_type_loader.face_from_pattern(&pattern, font_key)?
+                    {
                         return Ok(key);
                     } else {
                         continue;
@@ -426,7 +339,7 @@ impl FreeTypeRasterizer {
     fn get_rendered_glyph(&mut self, glyph_key: GlyphKey) -> Result<RasterizedGlyph, Error> {
         // Render a normal character if it's not a cursor.
         let font_key = self.face_for_glyph(glyph_key);
-        let face = &self.faces[&font_key];
+        let face = &self.free_type_loader.faces[&font_key];
         let index = face.ft_face.get_char_index(glyph_key.character as usize) as u32;
         let pixelsize = face
             .non_scalable
@@ -437,7 +350,7 @@ impl FreeTypeRasterizer {
         }
 
         unsafe {
-            let ft_lib = self.library.raw();
+            let ft_lib = self.free_type_loader.library.raw();
             freetype::ffi::FT_Library_SetLcdFilter(ft_lib, face.lcd_filter);
         }
 
@@ -499,95 +412,6 @@ impl FreeTypeRasterizer {
             }
 
             Ok(rasterized_glyph)
-        }
-    }
-
-    fn ft_load_flags(pattern: &PatternRef) -> LoadFlag {
-        let antialias = pattern.antialias().next().unwrap_or(true);
-        let autohint = pattern.autohint().next().unwrap_or(false);
-        let hinting = pattern.hinting().next().unwrap_or(true);
-        let rgba = pattern.rgba().next().unwrap_or(Rgba::Unknown);
-        let embedded_bitmaps = pattern.embeddedbitmap().next().unwrap_or(true);
-        let scalable = pattern.scalable().next().unwrap_or(true);
-        let color = pattern.color().next().unwrap_or(false);
-
-        // Disable hinting if so was requested.
-        let hintstyle = if hinting {
-            pattern.hintstyle().next().unwrap_or(fc::HintStyle::Full)
-        } else {
-            fc::HintStyle::None
-        };
-
-        let mut flags = match (antialias, hintstyle, rgba) {
-            (false, fc::HintStyle::None, _) => LoadFlag::NO_HINTING | LoadFlag::MONOCHROME,
-            (false, ..) => LoadFlag::TARGET_MONO | LoadFlag::MONOCHROME,
-            (true, fc::HintStyle::None, _) => LoadFlag::NO_HINTING,
-            // `hintslight` does *not* use LCD hinting even when a subpixel mode
-            // is selected.
-            //
-            // According to the FreeType docs,
-            //
-            // > You can use a hinting algorithm that doesn't correspond to the
-            // > same rendering mode.  As an example, it is possible to use the
-            // > ‘light’ hinting algorithm and have the results rendered in
-            // > horizontal LCD pixel mode.
-            //
-            // In practice, this means we can have `FT_LOAD_TARGET_LIGHT` with
-            // subpixel render modes like `FT_RENDER_MODE_LCD`. Libraries like
-            // cairo take the same approach and consider `hintslight` to always
-            // prefer `FT_LOAD_TARGET_LIGHT`.
-            (true, fc::HintStyle::Slight, _) => LoadFlag::TARGET_LIGHT,
-            (true, fc::HintStyle::Medium, _) => LoadFlag::TARGET_NORMAL,
-            // If LCD hinting is to be used, must select hintmedium or hintfull,
-            // have AA enabled, and select a subpixel mode.
-            (true, fc::HintStyle::Full, Rgba::Rgb) | (true, fc::HintStyle::Full, Rgba::Bgr) => {
-                LoadFlag::TARGET_LCD
-            },
-            (true, fc::HintStyle::Full, Rgba::Vrgb) | (true, fc::HintStyle::Full, Rgba::Vbgr) => {
-                LoadFlag::TARGET_LCD_V
-            },
-            // For non-rgba modes with Full hinting, just use the default hinting algorithm.
-            (true, fc::HintStyle::Full, Rgba::Unknown)
-            | (true, fc::HintStyle::Full, Rgba::None) => LoadFlag::TARGET_NORMAL,
-        };
-
-        // Non scalable fonts only have bitmaps, so disabling them entirely is likely not a
-        // desirable thing. Colored fonts aren't scalable, but also only have bitmaps.
-        if !embedded_bitmaps && scalable && !color {
-            flags |= LoadFlag::NO_BITMAP;
-        }
-
-        // Use color for colored fonts.
-        if color {
-            flags |= LoadFlag::COLOR;
-        }
-
-        // Force autohint if it was requested.
-        if autohint {
-            flags |= LoadFlag::FORCE_AUTOHINT;
-        }
-
-        flags
-    }
-
-    fn ft_render_mode(pat: &PatternRef) -> freetype::RenderMode {
-        let antialias = pat.antialias().next().unwrap_or(true);
-        let rgba = pat.rgba().next().unwrap_or(Rgba::Unknown);
-
-        match (antialias, rgba) {
-            (false, _) => freetype::RenderMode::Mono,
-            (_, Rgba::Rgb) | (_, Rgba::Bgr) => freetype::RenderMode::Lcd,
-            (_, Rgba::Vrgb) | (_, Rgba::Vbgr) => freetype::RenderMode::LcdV,
-            (true, _) => freetype::RenderMode::Normal,
-        }
-    }
-
-    fn ft_lcd_filter(pat: &PatternRef) -> c_uint {
-        match pat.lcdfilter().next().unwrap_or(fc::LcdFilter::Default) {
-            fc::LcdFilter::None => freetype::ffi::FT_LCD_FILTER_NONE,
-            fc::LcdFilter::Default => freetype::ffi::FT_LCD_FILTER_DEFAULT,
-            fc::LcdFilter::Light => freetype::ffi::FT_LCD_FILTER_LIGHT,
-            fc::LcdFilter::Legacy => freetype::ffi::FT_LCD_FILTER_LEGACY,
         }
     }
 
@@ -775,3 +599,189 @@ impl From<freetype::Error> for Error {
 }
 
 unsafe impl Send for FreeTypeRasterizer {}
+
+struct FreeTypeLoader {
+    library: Library,
+    faces: HashMap<FontKey, FaceLoadingProperties>,
+    ft_faces: HashMap<FtFaceLocation, Rc<FtFace>>,
+}
+
+impl FreeTypeLoader {
+    fn new() -> Result<FreeTypeLoader, Error> {
+        let library = Library::init()?;
+
+        #[cfg(ft_set_default_properties_available)]
+        unsafe {
+            // Initialize default properties, like user preferred interpreter.
+            freetype_sys::FT_Set_Default_Properties(library.raw());
+        };
+
+        Ok(FreeTypeLoader { library, faces: HashMap::new(), ft_faces: HashMap::new() })
+    }
+
+    fn load_ft_face(&mut self, ft_face_location: FtFaceLocation) -> Result<Rc<FtFace>, Error> {
+        let mut ft_face = self.library.new_face(&ft_face_location.path, ft_face_location.index)?;
+        if ft_face.has_color() {
+            unsafe {
+                // Select the colored bitmap size to use from the array of available sizes.
+                freetype_sys::FT_Select_Size(ft_face.raw_mut(), 0);
+            }
+        }
+
+        let ft_face = Rc::new(ft_face);
+        self.ft_faces.insert(ft_face_location, Rc::clone(&ft_face));
+
+        Ok(ft_face)
+    }
+
+    fn face_from_pattern(
+        &mut self,
+        pattern: &PatternRef,
+        font_key: FontKey,
+    ) -> Result<Option<FontKey>, Error> {
+        if let Some(ft_face_location) = pattern.ft_face_location(0) {
+            if self.faces.get(&font_key).is_some() {
+                return Ok(Some(font_key));
+            }
+
+            trace!("Got font path={:?}, index={:?}", ft_face_location.path, ft_face_location.index);
+
+            let ft_face = match self.ft_faces.get(&ft_face_location) {
+                Some(ft_face) => Rc::clone(ft_face),
+                None => self.load_ft_face(ft_face_location)?,
+            };
+
+            let non_scalable = if pattern.scalable().next().unwrap_or(true) {
+                None
+            } else {
+                Some(pattern.pixelsize().next().expect("has 1+ pixelsize") as f32)
+            };
+
+            let embolden = pattern.embolden().next().unwrap_or(false);
+
+            let matrix = pattern.get_matrix().map(|matrix| {
+                // Convert Fontconfig matrix to FreeType matrix.
+                let xx = to_fixedpoint_16_6(matrix.xx);
+                let xy = to_fixedpoint_16_6(matrix.xy);
+                let yx = to_fixedpoint_16_6(matrix.yx);
+                let yy = to_fixedpoint_16_6(matrix.yy);
+
+                Matrix { xx, xy, yx, yy }
+            });
+
+            let pixelsize_fixup_factor = pattern.pixelsizefixupfactor().next();
+
+            let rgba = pattern.rgba().next().unwrap_or(Rgba::Unknown);
+
+            let face = FaceLoadingProperties {
+                load_flags: Self::ft_load_flags(pattern),
+                render_mode: Self::ft_render_mode(pattern),
+                lcd_filter: Self::ft_lcd_filter(pattern),
+                non_scalable,
+                colored: ft_face.has_color(),
+                embolden,
+                matrix,
+                pixelsize_fixup_factor,
+                ft_face,
+                rgba,
+            };
+
+            debug!("Loaded Face {:?}", face);
+
+            self.faces.insert(font_key, face);
+
+            Ok(Some(font_key))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn ft_load_flags(pattern: &PatternRef) -> LoadFlag {
+        let antialias = pattern.antialias().next().unwrap_or(true);
+        let autohint = pattern.autohint().next().unwrap_or(false);
+        let hinting = pattern.hinting().next().unwrap_or(true);
+        let rgba = pattern.rgba().next().unwrap_or(Rgba::Unknown);
+        let embedded_bitmaps = pattern.embeddedbitmap().next().unwrap_or(true);
+        let scalable = pattern.scalable().next().unwrap_or(true);
+        let color = pattern.color().next().unwrap_or(false);
+
+        // Disable hinting if so was requested.
+        let hintstyle = if hinting {
+            pattern.hintstyle().next().unwrap_or(fc::HintStyle::Full)
+        } else {
+            fc::HintStyle::None
+        };
+
+        let mut flags = match (antialias, hintstyle, rgba) {
+            (false, fc::HintStyle::None, _) => LoadFlag::NO_HINTING | LoadFlag::MONOCHROME,
+            (false, ..) => LoadFlag::TARGET_MONO | LoadFlag::MONOCHROME,
+            (true, fc::HintStyle::None, _) => LoadFlag::NO_HINTING,
+            // `hintslight` does *not* use LCD hinting even when a subpixel mode
+            // is selected.
+            //
+            // According to the FreeType docs,
+            //
+            // > You can use a hinting algorithm that doesn't correspond to the
+            // > same rendering mode.  As an example, it is possible to use the
+            // > ‘light’ hinting algorithm and have the results rendered in
+            // > horizontal LCD pixel mode.
+            //
+            // In practice, this means we can have `FT_LOAD_TARGET_LIGHT` with
+            // subpixel render modes like `FT_RENDER_MODE_LCD`. Libraries like
+            // cairo take the same approach and consider `hintslight` to always
+            // prefer `FT_LOAD_TARGET_LIGHT`.
+            (true, fc::HintStyle::Slight, _) => LoadFlag::TARGET_LIGHT,
+            (true, fc::HintStyle::Medium, _) => LoadFlag::TARGET_NORMAL,
+            // If LCD hinting is to be used, must select hintmedium or hintfull,
+            // have AA enabled, and select a subpixel mode.
+            (true, fc::HintStyle::Full, Rgba::Rgb) | (true, fc::HintStyle::Full, Rgba::Bgr) => {
+                LoadFlag::TARGET_LCD
+            },
+            (true, fc::HintStyle::Full, Rgba::Vrgb) | (true, fc::HintStyle::Full, Rgba::Vbgr) => {
+                LoadFlag::TARGET_LCD_V
+            },
+            // For non-rgba modes with Full hinting, just use the default hinting algorithm.
+            (true, fc::HintStyle::Full, Rgba::Unknown)
+            | (true, fc::HintStyle::Full, Rgba::None) => LoadFlag::TARGET_NORMAL,
+        };
+
+        // Non scalable fonts only have bitmaps, so disabling them entirely is likely not a
+        // desirable thing. Colored fonts aren't scalable, but also only have bitmaps.
+        if !embedded_bitmaps && scalable && !color {
+            flags |= LoadFlag::NO_BITMAP;
+        }
+
+        // Use color for colored fonts.
+        if color {
+            flags |= LoadFlag::COLOR;
+        }
+
+        // Force autohint if it was requested.
+        if autohint {
+            flags |= LoadFlag::FORCE_AUTOHINT;
+        }
+
+        flags
+    }
+
+    fn ft_render_mode(pat: &PatternRef) -> freetype::RenderMode {
+        let antialias = pat.antialias().next().unwrap_or(true);
+        let rgba = pat.rgba().next().unwrap_or(Rgba::Unknown);
+
+        match (antialias, rgba) {
+            (false, _) => freetype::RenderMode::Mono,
+            (_, Rgba::Rgb) | (_, Rgba::Bgr) => freetype::RenderMode::Lcd,
+            (_, Rgba::Vrgb) | (_, Rgba::Vbgr) => freetype::RenderMode::LcdV,
+            (true, _) => freetype::RenderMode::Normal,
+        }
+    }
+
+    fn ft_lcd_filter(pat: &PatternRef) -> c_uint {
+        match pat.lcdfilter().next().unwrap_or(fc::LcdFilter::Default) {
+            fc::LcdFilter::None => freetype::ffi::FT_LCD_FILTER_NONE,
+            fc::LcdFilter::Default => freetype::ffi::FT_LCD_FILTER_DEFAULT,
+            fc::LcdFilter::Light => freetype::ffi::FT_LCD_FILTER_LIGHT,
+            fc::LcdFilter::Legacy => freetype::ffi::FT_LCD_FILTER_LEGACY,
+        }
+    }
+}
