@@ -82,7 +82,7 @@ impl fmt::Debug for FaceLoadingProperties {
 
 /// Rasterizes glyphs for a single font face.
 pub struct FreeTypeRasterizer {
-    free_type_loader: FreeTypeLoader,
+    loader: FreeTypeLoader,
     fallback_lists: HashMap<FontKey, FallbackList>,
     device_pixel_ratio: f32,
 }
@@ -100,14 +100,14 @@ fn to_fixedpoint_16_6(f: f64) -> c_long {
 impl Rasterize for FreeTypeRasterizer {
     fn new(device_pixel_ratio: f32, _: bool) -> Result<FreeTypeRasterizer, Error> {
         Ok(FreeTypeRasterizer {
-            free_type_loader: FreeTypeLoader::new()?,
+            loader: FreeTypeLoader::new()?,
             fallback_lists: HashMap::new(),
             device_pixel_ratio,
         })
     }
 
     fn metrics(&self, key: FontKey, _size: Size) -> Result<Metrics, Error> {
-        let face = &mut self.free_type_loader.faces.get(&key).ok_or(Error::UnknownFontKey)?;
+        let face = &mut self.loader.faces.get(&key).ok_or(Error::UnknownFontKey)?;
         let full = self.full_metrics(&face)?;
 
         let ascent = (full.size_metrics.ascender / 64) as f32;
@@ -241,8 +241,8 @@ impl FreeTypeRasterizer {
         }
 
         // Load font if we haven't loaded it yet.
-        if !self.free_type_loader.faces.contains_key(&primary_font_key) {
-            self.free_type_loader
+        if !self.loader.faces.contains_key(&primary_font_key) {
+            self.loader
                 .face_from_pattern(&primary_font, primary_font_key)
                 .and_then(|pattern| pattern.ok_or_else(|| Error::FontNotFound(desc.to_owned())))?;
         }
@@ -283,7 +283,7 @@ impl FreeTypeRasterizer {
     }
 
     fn face_for_glyph(&mut self, glyph_key: GlyphKey) -> FontKey {
-        if let Some(face) = self.free_type_loader.faces.get(&glyph_key.font_key) {
+        if let Some(face) = self.loader.faces.get(&glyph_key.font_key) {
             let index = face.ft_face.get_char_index(glyph_key.character as usize);
 
             if index != 0 {
@@ -305,7 +305,7 @@ impl FreeTypeRasterizer {
         for fallback_font in &fallback_list.list {
             let font_key = fallback_font.key;
             let font_pattern = &fallback_font.pattern;
-            match self.free_type_loader.faces.get(&font_key) {
+            match self.loader.faces.get(&font_key) {
                 Some(face) => {
                     let index = face.ft_face.get_char_index(glyph.character as usize);
 
@@ -321,9 +321,7 @@ impl FreeTypeRasterizer {
                     }
 
                     let pattern = font_pattern.clone();
-                    if let Some(key) =
-                        self.free_type_loader.face_from_pattern(&pattern, font_key)?
-                    {
+                    if let Some(key) = self.loader.face_from_pattern(&pattern, font_key)? {
                         return Ok(key);
                     } else {
                         continue;
@@ -339,7 +337,7 @@ impl FreeTypeRasterizer {
     fn get_rendered_glyph(&mut self, glyph_key: GlyphKey) -> Result<RasterizedGlyph, Error> {
         // Render a normal character if it's not a cursor.
         let font_key = self.face_for_glyph(glyph_key);
-        let face = &self.free_type_loader.faces[&font_key];
+        let face = &self.loader.faces[&font_key];
         let index = face.ft_face.get_char_index(glyph_key.character as usize) as u32;
         let pixelsize = face
             .non_scalable
@@ -350,7 +348,7 @@ impl FreeTypeRasterizer {
         }
 
         unsafe {
-            let ft_lib = self.free_type_loader.library.raw();
+            let ft_lib = self.loader.library.raw();
             freetype::ffi::FT_Library_SetLcdFilter(ft_lib, face.lcd_filter);
         }
 
