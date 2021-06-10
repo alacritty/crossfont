@@ -323,8 +323,6 @@ impl FreeTypeRasterizer {
                     let pattern = font_pattern.clone();
                     if let Some(key) = self.loader.face_from_pattern(&pattern, font_key)? {
                         return Ok(key);
-                    } else {
-                        continue;
                     }
                 },
             }
