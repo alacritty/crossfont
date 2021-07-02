@@ -49,7 +49,7 @@ pub fn font_match(config: &ConfigRef, pattern: &PatternRef) -> Option<Pattern> {
 }
 
 /// Reloads the Fontconfig configuration files.
-pub fn bring_config_upto_date() {
+pub fn update_config() {
     unsafe {
         let _ = FcInitBringUptoDate();
     }

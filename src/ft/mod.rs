@@ -26,7 +26,7 @@ use super::{
 /// https://freetype.org/freetype2/docs/reference/ft2-base_interface.html#ft_get_char_index
 const MISSING_GLYPH_INDEX: u32 = 0;
 
-/// Font reload delay.
+/// Delay before font config reload after creating the `Rasterizer`.
 const RELOAD_DELAY: Duration = Duration::from_secs(2);
 
 struct FallbackFont {
@@ -90,10 +90,8 @@ pub struct FreeTypeRasterizer {
     fallback_lists: HashMap<FontKey, FallbackList>,
     device_pixel_ratio: f32,
 
-    /// Rasterizer creation time stamp to delay lazy font list updates
+    /// Rasterizer creation time stamp to delay lazy font config updates
     /// in `Rasterizer::laod_font`.
-    ///
-    /// if the value is `None`, update could be done unconditionally.
     initialization_time_stamp: Option<Instant>,
 }
 
@@ -166,16 +164,9 @@ impl Rasterize for FreeTypeRasterizer {
     }
 
     fn load_font(&mut self, desc: &FontDesc, size: Size) -> Result<FontKey, Error> {
-        match self.initialization_time_stamp.as_ref() {
-            None => fc::bring_config_upto_date(),
-            Some(initialization_time_stamp)
-                if initialization_time_stamp.elapsed() > RELOAD_DELAY =>
-            {
-                // Reset time stamp.
-                self.initialization_time_stamp = None;
-                fc::bring_config_upto_date();
-            }
-            _ => (),
+        if self.initialization_time_stamp.map_or(true, |t| t.elapsed() > RELOAD_DELAY) {
+            self.initialization_time_stamp = None;
+            fc::update_config();
         }
 
         self.get_face(desc, size)
