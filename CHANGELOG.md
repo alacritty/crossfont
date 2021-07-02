@@ -6,6 +6,12 @@ The sections should follow the order `Added`, `Changed`, `Fixed`, and `Removed`.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- On systems using Fontconfig backend newly added fonts not visible upon `Rasterizer` recreation.
+
 ## 0.3.0
 
 ### Changed
