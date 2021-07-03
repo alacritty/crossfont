@@ -164,7 +164,7 @@ impl Rasterize for FreeTypeRasterizer {
     }
 
     fn load_font(&mut self, desc: &FontDesc, size: Size) -> Result<FontKey, Error> {
-        if self.creation_timestamp.map_or(true, |t| t.elapsed() > RELOAD_DELAY) {
+        if self.creation_timestamp.map_or(true, |timestamp| timestamp.elapsed() > RELOAD_DELAY) {
             self.creation_timestamp = None;
             fc::update_config();
         }
