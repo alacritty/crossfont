@@ -56,7 +56,7 @@ pub enum Style {
 impl fmt::Display for Style {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Style::Specific(ref s) => f.write_str(&s),
+            Style::Specific(ref s) => f.write_str(s),
             Style::Description { slant, weight } => {
                 write!(f, "slant={:?}, weight={:?}", slant, weight)
             },

@@ -467,7 +467,7 @@ impl PatternRef {
     ///
     /// `object` is not checked to be a valid null-terminated string.
     unsafe fn add_string(&mut self, object: &[u8], value: &str) -> bool {
-        let value = CString::new(&value[..]).unwrap();
+        let value = CString::new(value).unwrap();
         let value = value.as_ptr();
 
         FcPatternAddString(self.as_ptr(), object.as_ptr() as *mut c_char, value as *mut FcChar8)

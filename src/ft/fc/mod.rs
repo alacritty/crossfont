@@ -5,6 +5,7 @@ use foreign_types::{ForeignType, ForeignTypeRef};
 
 use fontconfig::fontconfig as ffi;
 
+use ffi::FcInitBringUptoDate;
 use ffi::FcResultNoMatch;
 use ffi::{FcFontList, FcFontMatch, FcFontSort};
 use ffi::{FcMatchFont, FcMatchPattern, FcMatchScan};
@@ -44,6 +45,13 @@ pub fn font_match(config: &ConfigRef, pattern: &PatternRef) -> Option<Pattern> {
         } else {
             Some(Pattern::from_ptr(ptr))
         }
+    }
+}
+
+/// Reloads the Fontconfig configuration files.
+pub fn update_config() {
+    unsafe {
+        let _ = FcInitBringUptoDate();
     }
 }
 

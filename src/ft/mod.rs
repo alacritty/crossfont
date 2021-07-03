@@ -4,6 +4,7 @@ use std::cmp::{min, Ordering};
 use std::collections::HashMap;
 use std::fmt::{self, Formatter};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use freetype::face::LoadFlag;
 use freetype::tt_os2::TrueTypeOS2Table;
@@ -24,6 +25,9 @@ use super::{
 /// FreeType uses 0 for the missing glyph:
 /// https://freetype.org/freetype2/docs/reference/ft2-base_interface.html#ft_get_char_index
 const MISSING_GLYPH_INDEX: u32 = 0;
+
+/// Delay before font config reload after creating the `Rasterizer`.
+const RELOAD_DELAY: Duration = Duration::from_secs(2);
 
 struct FallbackFont {
     pattern: Pattern,
@@ -85,6 +89,10 @@ pub struct FreeTypeRasterizer {
     loader: FreeTypeLoader,
     fallback_lists: HashMap<FontKey, FallbackList>,
     device_pixel_ratio: f32,
+
+    /// Rasterizer creation time stamp to delay lazy font config updates
+    /// in `Rasterizer::load_font`.
+    creation_timestamp: Option<Instant>,
 }
 
 #[inline]
@@ -103,12 +111,13 @@ impl Rasterize for FreeTypeRasterizer {
             loader: FreeTypeLoader::new()?,
             fallback_lists: HashMap::new(),
             device_pixel_ratio,
+            creation_timestamp: Some(Instant::now()),
         })
     }
 
     fn metrics(&self, key: FontKey, _size: Size) -> Result<Metrics, Error> {
         let face = &mut self.loader.faces.get(&key).ok_or(Error::UnknownFontKey)?;
-        let full = self.full_metrics(&face)?;
+        let full = self.full_metrics(face)?;
 
         let ascent = (full.size_metrics.ascender / 64) as f32;
         let descent = (full.size_metrics.descender / 64) as f32;
@@ -155,6 +164,11 @@ impl Rasterize for FreeTypeRasterizer {
     }
 
     fn load_font(&mut self, desc: &FontDesc, size: Size) -> Result<FontKey, Error> {
+        if self.creation_timestamp.map_or(true, |timestamp| timestamp.elapsed() > RELOAD_DELAY) {
+            self.creation_timestamp = None;
+            fc::update_config();
+        }
+
         self.get_face(desc, size)
     }
 
@@ -223,7 +237,7 @@ impl FreeTypeRasterizer {
 
         // Get font list using pattern. First font is the primary one while the rest are fallbacks.
         let matched_fonts =
-            fc::font_sort(&config, &pattern).ok_or_else(|| Error::FontNotFound(desc.to_owned()))?;
+            fc::font_sort(config, &pattern).ok_or_else(|| Error::FontNotFound(desc.to_owned()))?;
         let mut matched_fonts = matched_fonts.into_iter();
 
         let primary_font =
@@ -259,7 +273,7 @@ impl FreeTypeRasterizer {
                 let fallback_font = pattern.render_prepare(config, fallback_font);
                 let fallback_font_key = FontKey::from_pattern_hashes(hash, fallback_font.hash());
 
-                coverage.merge(&charset);
+                coverage.merge(charset);
 
                 FallbackFont::new(fallback_font, fallback_font_key)
             })
