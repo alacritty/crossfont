@@ -91,8 +91,8 @@ pub struct FreeTypeRasterizer {
     device_pixel_ratio: f32,
 
     /// Rasterizer creation time stamp to delay lazy font config updates
-    /// in `Rasterizer::laod_font`.
-    initialization_time_stamp: Option<Instant>,
+    /// in `Rasterizer::load_font`.
+    creation_timestamp: Option<Instant>,
 }
 
 #[inline]
@@ -111,7 +111,7 @@ impl Rasterize for FreeTypeRasterizer {
             loader: FreeTypeLoader::new()?,
             fallback_lists: HashMap::new(),
             device_pixel_ratio,
-            initialization_time_stamp: Some(Instant::now()),
+            creation_timestamp: Some(Instant::now()),
         })
     }
 
@@ -164,8 +164,8 @@ impl Rasterize for FreeTypeRasterizer {
     }
 
     fn load_font(&mut self, desc: &FontDesc, size: Size) -> Result<FontKey, Error> {
-        if self.initialization_time_stamp.map_or(true, |t| t.elapsed() > RELOAD_DELAY) {
-            self.initialization_time_stamp = None;
+        if self.creation_timestamp.map_or(true, |t| t.elapsed() > RELOAD_DELAY) {
+            self.creation_timestamp = None;
             fc::update_config();
         }
 

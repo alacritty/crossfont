@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- On systems using Fontconfig backend newly added fonts not visible upon `Rasterizer` recreation.
+- Fontconfig not checking for new fonts installed after `Rasterizer` creation when calling `Rasterizer::load_font`.
 
 ## 0.3.0
 
