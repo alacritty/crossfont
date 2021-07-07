@@ -281,13 +281,7 @@ pub fn set_font_smoothing(enable: bool) {
 pub fn get_family_names() -> Vec<String> {
     // CFArray of CFStringRef.
     let names = ct_get_family_names();
-    let mut owned_names = Vec::new();
-
-    for name in names.iter() {
-        owned_names.push(name.to_string());
-    }
-
-    owned_names
+    names.into_iter().map(|name| name.to_string()).collect()
 }
 
 /// Return fallback descriptors for font/language list.
