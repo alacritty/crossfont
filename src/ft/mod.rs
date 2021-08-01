@@ -378,20 +378,22 @@ impl FreeTypeRasterizer {
         }
 
         // Transform glyphs with the matrix from Fontconfig. Primarily used to generate italics.
-        if let Some(matrix) = face.matrix.as_ref() {
-            let glyph = face.ft_face.raw().glyph;
-
-            unsafe {
+        unsafe {
+            let raw_glyph = face.ft_face.raw().glyph;
+            if let Some(matrix) = face.matrix.as_ref() {
                 // Check that the glyph is a vectorial outline, not a bitmap.
-                if (*glyph).format == freetype_sys::FT_GLYPH_FORMAT_OUTLINE {
-                    let outline = &(*glyph).outline;
+                if (*raw_glyph).format == freetype_sys::FT_GLYPH_FORMAT_OUTLINE {
+                    let outline = &(*raw_glyph).outline;
 
                     freetype_sys::FT_Outline_Transform(outline, matrix);
                 }
             }
-        }
 
-        glyph.render_glyph(face.render_mode)?;
+            // Don't render bitmap glyphs, it results in error with freestype 2.11.0.
+            if (*raw_glyph).format != freetype_sys::FT_GLYPH_FORMAT_BITMAP {
+                glyph.render_glyph(face.render_mode)?;
+            }
+        }
 
         let (pixel_height, pixel_width, buffer) =
             Self::normalize_buffer(&glyph.bitmap(), &face.rgba)?;
