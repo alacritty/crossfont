@@ -88,19 +88,17 @@ impl Descriptor {
                         .map(|desc| desc.to_font(size, false))
                         .collect::<Vec<_>>();
 
-                    // TODO, we can't use apple's proposed
-                    // .Apple Symbol Fallback (filtered out below),
-                    // but not having these makes us not able to render
-                    // many chars. We add the symbols back in.
-                    // Investigate if we can actually use the .-prefixed
-                    // fallbacks somehow.
-                    if let Some(descriptor) =
-                        descriptors_for_family("Apple Symbols").into_iter().next()
-                    {
-                        fallbacks.push(descriptor.to_font(size, false))
-                    };
+                    // TODO, we haven't found a way to use Apple's standard
+                    // .Apple Symbols Fallback font. And it's filtered out of
+                    // the cascade list requested above, due to not having a
+                    // path. The fallbacks that we do get, however, include the
+                    // normal Apple Symbols font. So there's no need to add it
+                    // manually, as was done here before. A test is now included
+                    // below, which prints a list of the few dozen fallback
+                    // fonts that are given for Menlo Regular (English).
 
-                    // Include Menlo in the fallback list as well.
+                    // Include Menlo at the beginning of the fallback list; it
+                    // wouldn't otherwise be part of its own cascade.
                     fallbacks.insert(0, Font {
                         cg_font: menlo.copy_to_CGFont(),
                         ct_font: menlo,
@@ -556,6 +554,24 @@ mod tests {
                     println!();
                 }
             }
+        }
+    }
+
+    #[test]
+    fn menlo_fallback_list() {
+        let menlo_regular = super::descriptors_for_family("Menlo")
+            .into_iter()
+            .find(|d| d.style_name == "Regular")
+            .unwrap();
+
+        let ct = super::ct_new_from_descriptor(&menlo_regular.ct_descriptor, 13.);
+
+        let fallbacks = super::cascade_list_for_languages(&ct, &["en".to_string()])
+            .into_iter()
+            .filter(|desc| !desc.font_path.as_os_str().is_empty());
+
+        for (i, desc) in fallbacks.enumerate() {
+            println!("{}: {}", (i + 1), desc.font_name);
         }
     }
 }
