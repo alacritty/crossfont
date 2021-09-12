@@ -97,6 +97,20 @@ impl Descriptor {
                     // below, which prints a list of the few dozen fallback
                     // fonts that are given for Menlo Regular (English).
 
+                    // While there are still problems with font fallback on
+                    // macOS, we can improve the situation by adding Noto Sans
+                    // to the list -- only if it's available. Users who are
+                    // seeing issues with certain uncommon characters can be
+                    // advised to install Noto Sans.
+                    if get_family_names().contains(&"Noto Sans".to_string()) {
+                        if let Some(noto_regular) = descriptors_for_family("Noto Sans")
+                            .into_iter()
+                            .find(|d| d.style_name == "Regular")
+                        {
+                            fallbacks.push(noto_regular.to_font(size, false))
+                        }
+                    }
+
                     // Include Menlo at the beginning of the fallback list; it
                     // wouldn't otherwise be part of its own cascade.
                     fallbacks.insert(0, Font {
