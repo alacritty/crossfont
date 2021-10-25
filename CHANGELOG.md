@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Minimum Rust version has been bumped to 1.46.0
+- Core Text backend uses a current font as the original fallback font instead of Menlo
+
+### Fixed
+
+- Core Text backend ignoring style for font fallback
 
 ## 0.3.1
 

@@ -15,7 +15,7 @@ use core_graphics::font::{CGFont, CGGlyph};
 use core_graphics::geometry::{CGPoint, CGRect, CGSize};
 use core_text::font::{
     cascade_list_for_languages as ct_cascade_list_for_languages,
-    new_from_descriptor as ct_new_from_descriptor, CTFont,
+    new_from_descriptor as ct_new_from_descriptor, new_from_name, CTFont,
 };
 use core_text::font_collection::create_for_family;
 use core_text::font_collection::get_family_names as ct_get_family_names;
@@ -75,41 +75,28 @@ impl Descriptor {
         let cg_font = ct_font.copy_to_CGFont();
 
         let fallbacks = if load_fallbacks {
-            descriptors_for_family("Menlo")
+            // TODO fixme, hardcoded en for english.
+            let mut fallbacks = cascade_list_for_languages(&ct_font, &["en".to_owned()])
                 .into_iter()
-                .find(|d| d.font_name == "Menlo-Regular")
-                .map(|descriptor| {
-                    let menlo = ct_new_from_descriptor(&descriptor.ct_descriptor, size);
+                .filter(|desc| !desc.font_path.as_os_str().is_empty())
+                .map(|desc| desc.to_font(size, false))
+                .collect::<Vec<_>>();
 
-                    // TODO fixme, hardcoded en for english.
-                    let mut fallbacks = cascade_list_for_languages(&menlo, &["en".to_owned()])
-                        .into_iter()
-                        .filter(|desc| !desc.font_path.as_os_str().is_empty())
-                        .map(|desc| desc.to_font(size, false))
-                        .collect::<Vec<_>>();
-
-                    // TODO, we can't use apple's proposed
-                    // .Apple Symbol Fallback (filtered out below),
-                    // but not having these makes us not able to render
-                    // many chars. We add the symbols back in.
-                    // Investigate if we can actually use the .-prefixed
-                    // fallbacks somehow.
-                    if let Some(descriptor) =
-                        descriptors_for_family("Apple Symbols").into_iter().next()
-                    {
-                        fallbacks.push(descriptor.to_font(size, false))
-                    };
-
-                    // Include Menlo in the fallback list as well.
-                    fallbacks.insert(0, Font {
-                        cg_font: menlo.copy_to_CGFont(),
-                        ct_font: menlo,
-                        fallbacks: Vec::new(),
-                    });
-
-                    fallbacks
+            // TODO, we can't use apple's proposed
+            // .Apple Symbol Fallback (filtered out below),
+            // but not having these makes us not able to render
+            // many chars. We add the symbols back in.
+            // Investigate if we can actually use the .-prefixed
+            // fallbacks somehow.
+            if let Ok(apple_symbols) = new_from_name("Apple Symbols", size) {
+                fallbacks.push(Font {
+                    cg_font: apple_symbols.copy_to_CGFont(),
+                    ct_font: apple_symbols,
+                    fallbacks: Vec::new(),
                 })
-                .unwrap_or_else(Vec::new)
+            };
+
+            fallbacks
         } else {
             Vec::new()
         };
