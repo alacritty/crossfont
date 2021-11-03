@@ -25,8 +25,8 @@ tasks:
       cargo +nightly fmt -- --check
   - oldstable: |
       cd crossfont
-      rustup toolchain install --profile minimal 1.43.1
-      rustup default 1.43.1
+      rustup toolchain install --profile minimal 1.46.0
+      rustup default 1.46.0
       cargo test
   - clippy: |
       cd crossfont
