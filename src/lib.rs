@@ -27,6 +27,10 @@ mod darwin;
 #[cfg(target_os = "macos")]
 pub use darwin::*;
 
+// If target isn't Linux/BSD, and the harfbuzz feature is enabled, error since it cannot work (yet).
+#[cfg(all(any(target_os = "macos", windows), feature = "harfbuzz"))]
+compile_error!("harfbuzz is not yet supported on windows and macos.");
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FontDesc {
     name: String,
@@ -96,9 +100,67 @@ impl FontKey {
     }
 }
 
+/// An identifier of a glyph.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg(feature = "harfbuzz")]
+pub struct GlyphId(u32);
+
+#[cfg(feature = "harfbuzz")]
+const C_BIT: u32 = 0b1000_0000_0000_0000_0000_0000_0000_0000;
+
+#[cfg(feature = "harfbuzz")]
+const C_MASK: u32 = !C_BIT;
+
+#[cfg(feature = "harfbuzz")]
+impl GlyphId {
+    /// Creates a `GlyphId` representing a unicode scalar value.
+    pub fn char(c: char) -> Self {
+        Self(c as u32 | C_BIT)
+    }
+
+    /// Creates a `GlyphId` representing a placeholder value.
+    pub fn placeholder() -> Self {
+        Self(0)
+    }
+
+    pub fn value(self) -> u32 {
+        self.0
+    }
+
+    pub fn as_char(self) -> Option<char> {
+        let value = self.value();
+
+        if value & C_BIT != 0 {
+            // SAFETY: this is safe because we never construct a `GlyphId` with the C_BIT set
+            // with an invalid character.
+            unsafe { Some(char::from_u32_unchecked(value & C_MASK)) }
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(feature = "harfbuzz")]
+impl fmt::Debug for GlyphId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = f.debug_tuple("GlyphId");
+
+        if let Some(c) = self.as_char() {
+            f.field(&c);
+        } else {
+            f.field(&self.value());
+        }
+
+        f.finish()
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct GlyphKey {
+    #[cfg(not(feature = "harfbuzz"))]
     pub character: char,
+    #[cfg(feature = "harfbuzz")]
+    pub id: GlyphId,
     pub font_key: FontKey,
     pub size: Size,
 }
@@ -149,7 +211,10 @@ impl From<f32> for Size {
 
 #[derive(Clone)]
 pub struct RasterizedGlyph {
+    #[cfg(not(feature = "harfbuzz"))]
     pub character: char,
+    #[cfg(feature = "harfbuzz")]
+    pub id: GlyphId,
     pub width: i32,
     pub height: i32,
     pub top: i32,
@@ -169,7 +234,10 @@ pub enum BitmapBuffer {
 impl Default for RasterizedGlyph {
     fn default() -> RasterizedGlyph {
         RasterizedGlyph {
+            #[cfg(not(feature = "harfbuzz"))]
             character: ' ',
+            #[cfg(feature = "harfbuzz")]
+            id: GlyphId::placeholder(),
             width: 0,
             height: 0,
             top: 0,
@@ -181,9 +249,19 @@ impl Default for RasterizedGlyph {
 
 impl fmt::Debug for RasterizedGlyph {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("RasterizedGlyph")
-            .field("character", &self.character)
-            .field("width", &self.width)
+        let mut f = f.debug_struct("RasterizedGlyph");
+
+        #[cfg(not(feature = "harfbuzz"))]
+        {
+            f.field("character", &self.character);
+        }
+
+        #[cfg(feature = "harfbuzz")]
+        {
+            f.field("id", &self.id);
+        }
+
+        f.field("width", &self.width)
             .field("height", &self.height)
             .field("top", &self.top)
             .field("left", &self.left)
@@ -220,11 +298,17 @@ pub enum Error {
 
     /// Error from platfrom's font system.
     PlatformError(String),
+
+    /// Error while reading a file.
+    Io(std::io::Error),
 }
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
+        match self {
+            Self::Io(err) => err.source(),
+            _ => None,
+        }
     }
 }
 
@@ -233,18 +317,37 @@ impl Display for Error {
         match self {
             Error::FontNotFound(font) => write!(f, "font {:?} not found", font),
             Error::MissingGlyph(glyph) => {
-                write!(f, "glyph for character {:?} not found", glyph.character)
+                #[cfg(not(feature = "harfbuzz"))]
+                {
+                    write!(f, "glyph for character {:?} not found", glyph.character)
+                }
+
+                #[cfg(feature = "harfbuzz")]
+                {
+                    write!(f, "glyph for {:?} not found", glyph.id)
+                }
             },
             Error::UnknownFontKey => f.write_str("invalid font key"),
             Error::MetricsNotFound => f.write_str("metrics not found"),
             Error::PlatformError(err) => write!(f, "{}", err),
+            Error::Io(err) => write!(f, "{}", err),
         }
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
     }
 }
 
 pub trait Rasterize {
     /// Create a new Rasterizer.
-    fn new(device_pixel_ratio: f32, use_thin_strokes: bool) -> Result<Self, Error>
+    fn new(
+        device_pixel_ratio: f32,
+        use_thin_strokes: bool,
+        use_font_ligatures: bool,
+    ) -> Result<Self, Error>
     where
         Self: Sized;
 

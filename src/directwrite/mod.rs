@@ -135,7 +135,7 @@ impl DirectWriteRasterizer {
 }
 
 impl crate::Rasterize for DirectWriteRasterizer {
-    fn new(device_pixel_ratio: f32, _: bool) -> Result<DirectWriteRasterizer, Error> {
+    fn new(device_pixel_ratio: f32, _: bool, _: bool) -> Result<DirectWriteRasterizer, Error> {
         Ok(DirectWriteRasterizer {
             fonts: HashMap::new(),
             keys: HashMap::new(),

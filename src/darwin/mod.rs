@@ -116,7 +116,7 @@ pub struct Rasterizer {
 }
 
 impl crate::Rasterize for Rasterizer {
-    fn new(device_pixel_ratio: f32, use_thin_strokes: bool) -> Result<Rasterizer, Error> {
+    fn new(device_pixel_ratio: f32, use_thin_strokes: bool, _: bool) -> Result<Rasterizer, Error> {
         Ok(Rasterizer {
             fonts: HashMap::new(),
             keys: HashMap::new(),
