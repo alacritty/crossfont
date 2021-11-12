@@ -15,8 +15,8 @@ use winapi::um::dwrite;
 use winapi::um::winnls::GetUserDefaultLocaleName;
 
 use super::{
-    BitmapBuffer, Error, FontDesc, FontKey, GlyphKey, Metrics, RasterizedGlyph, Size, Slant, Style,
-    Weight,
+    BitmapBuffer, Error, FontDesc, FontKey, GlyphId, GlyphKey, Metrics, RasterizedGlyph, Size,
+    Slant, Style, Weight,
 };
 
 /// DirectWrite uses 0 for missing glyph symbols.
@@ -30,6 +30,7 @@ struct Font {
     weight: FontWeight,
     style: FontStyle,
     stretch: FontStretch,
+    placeholder_glyph_index: u16,
 }
 
 pub struct DirectWriteRasterizer {
@@ -45,7 +46,7 @@ impl DirectWriteRasterizer {
         &self,
         face: &FontFace,
         size: Size,
-        character: char,
+        id: GlyphId,
         glyph_index: u16,
     ) -> Result<RasterizedGlyph, Error> {
         let em_size = em_size(size);
@@ -85,7 +86,7 @@ impl DirectWriteRasterizer {
         );
 
         Ok(RasterizedGlyph {
-            character,
+            id,
             width: (bounds.right - bounds.left) as i32,
             height: (bounds.bottom - bounds.top) as i32,
             top: -bounds.top,
@@ -232,17 +233,28 @@ impl crate::Rasterize for DirectWriteRasterizer {
 
         let loaded_fallback_font;
         let mut font = loaded_font;
-        let mut glyph_index = self.get_glyph_index(&loaded_font.face, glyph.character);
-        if glyph_index == MISSING_GLYPH_INDEX {
-            if let Some(fallback_font) = self.get_fallback_font(&loaded_font, glyph.character) {
-                loaded_fallback_font = Font::from(fallback_font);
-                glyph_index = self.get_glyph_index(&loaded_fallback_font.face, glyph.character);
-                font = &loaded_fallback_font;
+
+        let glyph_index = if let Some(character) = glyph.id.as_char() {
+            let mut glyph_index = self.get_glyph_index(&loaded_font.face, character);
+            if glyph_index == MISSING_GLYPH_INDEX {
+                if let Some(fallback_font) = self.get_fallback_font(&loaded_font, character) {
+                    loaded_fallback_font = Font::from(fallback_font);
+                    glyph_index = self.get_glyph_index(&loaded_fallback_font.face, character);
+                    font = &loaded_fallback_font;
+                }
             }
-        }
+            glyph_index
+        } else {
+            let index = glyph.id.value();
+            if index == 0 {
+                loaded_font.placeholder_glyph_index
+            } else {
+                index as u16
+            }
+        };
 
         let rasterized_glyph =
-            self.rasterize_glyph(&font.face, glyph.size, glyph.character, glyph_index)?;
+            self.rasterize_glyph(&font.face, glyph.size, glyph.id, glyph_index)?;
 
         if glyph_index == MISSING_GLYPH_INDEX {
             Err(Error::MissingGlyph(rasterized_glyph))
@@ -262,12 +274,17 @@ fn em_size(size: Size) -> f32 {
 
 impl From<dwrote::Font> for Font {
     fn from(font: dwrote::Font) -> Font {
+        let face = font.create_font_face();
+        let placeholder_glyph_index =
+            face.get_glyph_indices(&[' ' as u32]).first().copied().unwrap_or(MISSING_GLYPH_INDEX);
+
         Font {
-            face: font.create_font_face(),
+            face,
             family_name: font.family_name(),
             weight: font.weight(),
             style: font.style(),
             stretch: font.stretch(),
+            placeholder_glyph_index,
         }
     }
 }

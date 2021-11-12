@@ -96,9 +96,59 @@ impl FontKey {
     }
 }
 
+/// An identifier of a glyph.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GlyphId(u32);
+
+const C_BIT: u32 = 0b1000_0000_0000_0000_0000_0000_0000_0000;
+
+const C_MASK: u32 = !C_BIT;
+
+impl GlyphId {
+    /// Creates a `GlyphId` representing a unicode scalar value.
+    pub fn char(c: char) -> Self {
+        Self(c as u32 | C_BIT)
+    }
+
+    /// Creates a `GlyphId` representing a placeholder value.
+    pub fn placeholder() -> Self {
+        Self(0)
+    }
+
+    pub fn value(self) -> u32 {
+        self.0
+    }
+
+    pub fn as_char(self) -> Option<char> {
+        let value = self.value();
+
+        if value & C_BIT == 0 {
+            None
+        } else {
+            // SAFETY: this is safe because we never construct a `GlyphId` with the C_BIT set
+            // with an invalid character.
+            unsafe { Some(char::from_u32_unchecked(value & C_MASK)) }
+        }
+    }
+}
+
+impl fmt::Debug for GlyphId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = f.debug_tuple("GlyphId");
+
+        if let Some(c) = self.as_char() {
+            f.field(&c);
+        } else {
+            f.field(&self.value());
+        }
+
+        f.finish()
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct GlyphKey {
-    pub character: char,
+    pub id: GlyphId,
     pub font_key: FontKey,
     pub size: Size,
 }
@@ -149,7 +199,7 @@ impl From<f32> for Size {
 
 #[derive(Clone)]
 pub struct RasterizedGlyph {
-    pub character: char,
+    pub id: GlyphId,
     pub width: i32,
     pub height: i32,
     pub top: i32,
@@ -169,7 +219,7 @@ pub enum BitmapBuffer {
 impl Default for RasterizedGlyph {
     fn default() -> RasterizedGlyph {
         RasterizedGlyph {
-            character: ' ',
+            id: GlyphId::placeholder(),
             width: 0,
             height: 0,
             top: 0,
@@ -182,7 +232,7 @@ impl Default for RasterizedGlyph {
 impl fmt::Debug for RasterizedGlyph {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("RasterizedGlyph")
-            .field("character", &self.character)
+            .field("id", &self.id)
             .field("width", &self.width)
             .field("height", &self.height)
             .field("top", &self.top)
@@ -232,9 +282,7 @@ impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Error::FontNotFound(font) => write!(f, "font {:?} not found", font),
-            Error::MissingGlyph(glyph) => {
-                write!(f, "glyph for character {:?} not found", glyph.character)
-            },
+            Error::MissingGlyph(glyph) => write!(f, "glyph for {:?} not found", glyph.id),
             Error::UnknownFontKey => f.write_str("invalid font key"),
             Error::MetricsNotFound => f.write_str("metrics not found"),
             Error::PlatformError(err) => write!(f, "{}", err),
