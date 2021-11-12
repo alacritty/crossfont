@@ -120,14 +120,17 @@ impl GlyphId {
     }
 
     pub fn as_char(self) -> Option<char> {
+        use std::convert::TryFrom;
         let value = self.value();
 
         if value & C_BIT == 0 {
             None
         } else {
-            // SAFETY: this is safe because we never construct a `GlyphId` with the C_BIT set
-            // with an invalid character.
-            unsafe { Some(char::from_u32_unchecked(value & C_MASK)) }
+            match char::try_from(value & C_MASK) {
+                Ok(c) => Some(c),
+                // we never construct a `GlyphId` with the C_BIT set with an invalid character.
+                Err(_) => unreachable!(),
+            }
         }
     }
 }
