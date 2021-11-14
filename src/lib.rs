@@ -110,6 +110,14 @@ impl GlyphId {
         Self(c as u32 | C_BIT)
     }
 
+    /// Creates a `GlyphId` representing a glyph index.
+    ///
+    /// The index must not have the most significant bit set.
+    pub fn with_glyph_index(n: u32) -> Self {
+        assert!(n < C_BIT);
+        Self(n)
+    }
+
     /// Creates a `GlyphId` representing a placeholder value.
     pub fn placeholder() -> Self {
         Self(0)
