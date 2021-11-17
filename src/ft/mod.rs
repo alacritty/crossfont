@@ -63,6 +63,7 @@ pub struct FaceLoadingProperties {
     matrix: Option<Matrix>,
     pixelsize_fixup_factor: Option<f64>,
     ft_face: Rc<FtFace>,
+    pub location: FtFaceLocation,
     rgba: Rgba,
     placeholder_glyph_index: u32,
 }
@@ -718,6 +719,7 @@ impl FreeTypeLoader {
                 matrix,
                 pixelsize_fixup_factor,
                 ft_face,
+                location: ft_face_location,
                 rgba,
                 placeholder_glyph_index,
             };
