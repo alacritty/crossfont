@@ -64,7 +64,7 @@ impl Descriptor {
             font_name: desc.font_name(),
             style_name: desc.style_name(),
             display_name: desc.display_name(),
-            font_path: desc.font_path().unwrap_or_else(PathBuf::new),
+            font_path: desc.font_path().unwrap_or_default(),
             ct_descriptor: desc,
         }
     }
@@ -89,11 +89,13 @@ impl Descriptor {
             // Investigate if we can actually use the .-prefixed
             // fallbacks somehow.
             if let Ok(apple_symbols) = new_from_name("Apple Symbols", size) {
+                let path = apple_symbols.copy_descriptor().font_path().unwrap_or_default();
                 let mut font = Font {
                     cg_font: apple_symbols.copy_to_CGFont(),
                     ct_font: apple_symbols,
                     fallbacks: Vec::new(),
                     placeholder_glyph_index: 0,
+                    path,
                 };
                 font.placeholder_glyph_index = font.glyph_index(' ');
                 fallbacks.push(font);
@@ -104,7 +106,13 @@ impl Descriptor {
             Vec::new()
         };
 
-        let mut font = Font { ct_font, cg_font, fallbacks, placeholder_glyph_index: 0 };
+        let mut font = Font {
+            ct_font,
+            cg_font,
+            fallbacks,
+            placeholder_glyph_index: 0,
+            path: self.font_path.clone(),
+        };
         font.placeholder_glyph_index = font.glyph_index(' ');
         font
     }
@@ -189,6 +197,10 @@ impl crate::Rasterize for Rasterizer {
 
     fn update_dpr(&mut self, device_pixel_ratio: f32) {
         self.device_pixel_ratio = device_pixel_ratio;
+    }
+
+    fn font_path(&self, key: FontKey) -> Result<&std::path::Path, Error> {
+        self.fonts.get(&key).ok_or(Error::UnknownFontKey).map(|font| font.path.as_path())
     }
 }
 
@@ -335,6 +347,7 @@ pub struct Font {
     cg_font: CGFont,
     fallbacks: Vec<Font>,
     placeholder_glyph_index: u32,
+    path: PathBuf,
 }
 
 unsafe impl Send for Font {}
@@ -511,6 +524,8 @@ impl Font {
 
 #[cfg(test)]
 mod tests {
+    use crate::GlyphId;
+
     use super::BitmapBuffer;
 
     #[test]
@@ -533,7 +548,7 @@ mod tests {
             // Get a glyph.
             for character in &['a', 'b', 'c', 'd'] {
                 let glyph_index = font.glyph_index(*character);
-                let glyph = font.get_glyph(*character, glyph_index, false);
+                let glyph = font.get_glyph(GlyphId::char(*character), glyph_index, false);
 
                 let buffer = match &glyph.buffer {
                     BitmapBuffer::Rgb(buffer) | BitmapBuffer::Rgba(buffer) => buffer,

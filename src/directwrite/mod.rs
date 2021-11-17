@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
+use std::path::{Path, PathBuf};
 
 use dwrote::{
     FontCollection, FontFace, FontFallback, FontStretch, FontStyle, FontWeight, GlyphOffset,
@@ -31,6 +32,7 @@ struct Font {
     style: FontStyle,
     stretch: FontStretch,
     placeholder_glyph_index: u16,
+    path: PathBuf,
 }
 
 pub struct DirectWriteRasterizer {
@@ -266,6 +268,10 @@ impl crate::Rasterize for DirectWriteRasterizer {
     fn update_dpr(&mut self, device_pixel_ratio: f32) {
         self.device_pixel_ratio = device_pixel_ratio;
     }
+
+    fn font_path(&self, key: FontKey) -> Result<&Path, Error> {
+        Ok(&self.get_loaded_font(key)?.path)
+    }
 }
 
 fn em_size(size: Size) -> f32 {
@@ -277,6 +283,8 @@ impl From<dwrote::Font> for Font {
         let face = font.create_font_face();
         let placeholder_glyph_index =
             face.get_glyph_indices(&[' ' as u32]).first().copied().unwrap_or(MISSING_GLYPH_INDEX);
+        let files = face.get_files();
+        let path = files.first().unwrap().get_font_file_path().unwrap();
 
         Font {
             face,
@@ -285,6 +293,7 @@ impl From<dwrote::Font> for Font {
             style: font.style(),
             stretch: font.stretch(),
             placeholder_glyph_index,
+            path,
         }
     }
 }

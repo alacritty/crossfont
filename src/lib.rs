@@ -8,6 +8,7 @@
 
 use std::fmt::{self, Display, Formatter};
 use std::ops::{Add, Mul};
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 // If target isn't macos or windows, reexport everything from ft.
@@ -318,4 +319,9 @@ pub trait Rasterize {
 
     /// Update the Rasterizer's DPI factor.
     fn update_dpr(&mut self, device_pixel_ratio: f32);
+
+    /// Get the path of a font by its key.
+    ///
+    /// This is useful when you want to load the font for another library.
+    fn font_path(&self, _: FontKey) -> Result<&Path, Error>;
 }

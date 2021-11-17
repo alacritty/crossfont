@@ -3,6 +3,7 @@
 use std::cmp::{min, Ordering};
 use std::collections::HashMap;
 use std::fmt::{self, Formatter};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -63,7 +64,6 @@ pub struct FaceLoadingProperties {
     matrix: Option<Matrix>,
     pixelsize_fixup_factor: Option<f64>,
     ft_face: Rc<FtFace>,
-    pub location: FtFaceLocation,
     rgba: Rgba,
     placeholder_glyph_index: u32,
 }
@@ -88,7 +88,7 @@ impl fmt::Debug for FaceLoadingProperties {
 
 /// Rasterizes glyphs for a single font face.
 pub struct FreeTypeRasterizer {
-    pub loader: FreeTypeLoader,
+    loader: FreeTypeLoader,
     fallback_lists: HashMap<FontKey, FallbackList>,
     device_pixel_ratio: f32,
 
@@ -118,7 +118,7 @@ impl Rasterize for FreeTypeRasterizer {
     }
 
     fn metrics(&self, key: FontKey, _size: Size) -> Result<Metrics, Error> {
-        let face = &mut self.loader.faces.get(&key).ok_or(Error::UnknownFontKey)?;
+        let face = &self.loader.faces.get(&key).ok_or(Error::UnknownFontKey)?.0;
         let full = self.full_metrics(face)?;
 
         let ascent = (full.size_metrics.ascender / 64) as f32;
@@ -180,6 +180,10 @@ impl Rasterize for FreeTypeRasterizer {
 
     fn update_dpr(&mut self, device_pixel_ratio: f32) {
         self.device_pixel_ratio = device_pixel_ratio;
+    }
+
+    fn font_path(&self, key: FontKey) -> Result<&std::path::Path, Error> {
+        self.loader.faces.get(&key).ok_or(Error::UnknownFontKey).map(|(_, path)| path.as_path())
     }
 }
 
@@ -301,7 +305,7 @@ impl FreeTypeRasterizer {
     fn face_for_glyph(&mut self, glyph_key: GlyphKey) -> FontKey {
         if let Some(c) = glyph_key.id.as_char() {
             if let Some(face) = self.loader.faces.get(&glyph_key.font_key) {
-                let index = face.ft_face.get_char_index(c as usize);
+                let index = face.0.ft_face.get_char_index(c as usize);
 
                 if index != 0 {
                     return glyph_key.font_key;
@@ -331,7 +335,7 @@ impl FreeTypeRasterizer {
             let font_pattern = &fallback_font.pattern;
             match self.loader.faces.get(&font_key) {
                 Some(face) => {
-                    let index = face.ft_face.get_char_index(c as usize);
+                    let index = face.0.ft_face.get_char_index(c as usize);
 
                     // We found something in a current face, so let's use it.
                     if index != 0 {
@@ -358,7 +362,7 @@ impl FreeTypeRasterizer {
     fn get_rendered_glyph(&mut self, glyph_key: GlyphKey) -> Result<RasterizedGlyph, Error> {
         // Render a normal character if it's not a cursor.
         let font_key = self.face_for_glyph(glyph_key);
-        let face = &self.loader.faces[&font_key];
+        let face = &self.loader.faces[&font_key].0;
 
         let index = if let Some(c) = glyph_key.id.as_char() {
             face.ft_face.get_char_index(c as usize) as u32
@@ -634,8 +638,8 @@ unsafe impl Send for FreeTypeRasterizer {}
 
 pub struct FreeTypeLoader {
     library: Library,
-    pub faces: HashMap<FontKey, FaceLoadingProperties>,
-    pub ft_faces: HashMap<FtFaceLocation, Rc<FtFace>>,
+    faces: HashMap<FontKey, (FaceLoadingProperties, PathBuf)>,
+    ft_faces: HashMap<FtFaceLocation, Rc<FtFace>>,
 }
 
 impl FreeTypeLoader {
@@ -719,14 +723,13 @@ impl FreeTypeLoader {
                 matrix,
                 pixelsize_fixup_factor,
                 ft_face,
-                location: ft_face_location,
                 rgba,
                 placeholder_glyph_index,
             };
 
             debug!("Loaded Face {:?}", face);
 
-            self.faces.insert(font_key, face);
+            self.faces.insert(font_key, (face, ft_face_location.path));
 
             Ok(Some(font_key))
         } else {
