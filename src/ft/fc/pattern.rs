@@ -345,7 +345,7 @@ macro_rules! string_accessor {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct PatternHash(pub u32);
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Clone, Hash, Eq, PartialEq, Debug)]
 pub struct FtFaceLocation {
     pub path: PathBuf,
     pub index: isize,

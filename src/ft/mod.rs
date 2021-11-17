@@ -680,7 +680,7 @@ impl FreeTypeLoader {
 
             let ft_face = match self.ft_faces.get(&ft_face_location) {
                 Some(ft_face) => Rc::clone(ft_face),
-                None => self.load_ft_face(ft_face_location)?,
+                None => self.load_ft_face(ft_face_location.clone())?,
             };
 
             // This will be different for each font so we can't use a constant but we don't want to
