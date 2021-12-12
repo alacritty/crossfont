@@ -8,6 +8,7 @@
 
 use std::fmt::{self, Display, Formatter};
 use std::ops::{Add, Mul};
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 // If target isn't macos or windows, reexport everything from ft.
@@ -96,9 +97,70 @@ impl FontKey {
     }
 }
 
+/// An identifier of a glyph.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GlyphId(u32);
+
+const C_BIT: u32 = 0b1000_0000_0000_0000_0000_0000_0000_0000;
+
+const C_MASK: u32 = !C_BIT;
+
+impl GlyphId {
+    /// Creates a `GlyphId` representing a unicode scalar value.
+    pub fn char(c: char) -> Self {
+        Self(c as u32 | C_BIT)
+    }
+
+    /// Creates a `GlyphId` representing a glyph index.
+    ///
+    /// The index must not have the most significant bit set.
+    pub fn with_glyph_index(n: u32) -> Self {
+        assert!(n < C_BIT);
+        Self(n)
+    }
+
+    /// Creates a `GlyphId` representing a placeholder value.
+    pub fn placeholder() -> Self {
+        Self(0)
+    }
+
+    pub fn value(self) -> u32 {
+        self.0
+    }
+
+    pub fn as_char(self) -> Option<char> {
+        use std::convert::TryFrom;
+        let value = self.value();
+
+        if value & C_BIT == 0 {
+            None
+        } else {
+            match char::try_from(value & C_MASK) {
+                Ok(c) => Some(c),
+                // we never construct a `GlyphId` with the C_BIT set with an invalid character.
+                Err(_) => unreachable!(),
+            }
+        }
+    }
+}
+
+impl fmt::Debug for GlyphId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = f.debug_tuple("GlyphId");
+
+        if let Some(c) = self.as_char() {
+            f.field(&c);
+        } else {
+            f.field(&self.value());
+        }
+
+        f.finish()
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct GlyphKey {
-    pub character: char,
+    pub id: GlyphId,
     pub font_key: FontKey,
     pub size: Size,
 }
@@ -149,7 +211,7 @@ impl From<f32> for Size {
 
 #[derive(Clone)]
 pub struct RasterizedGlyph {
-    pub character: char,
+    pub id: GlyphId,
     pub width: i32,
     pub height: i32,
     pub top: i32,
@@ -169,7 +231,7 @@ pub enum BitmapBuffer {
 impl Default for RasterizedGlyph {
     fn default() -> RasterizedGlyph {
         RasterizedGlyph {
-            character: ' ',
+            id: GlyphId::placeholder(),
             width: 0,
             height: 0,
             top: 0,
@@ -182,7 +244,7 @@ impl Default for RasterizedGlyph {
 impl fmt::Debug for RasterizedGlyph {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("RasterizedGlyph")
-            .field("character", &self.character)
+            .field("id", &self.id)
             .field("width", &self.width)
             .field("height", &self.height)
             .field("top", &self.top)
@@ -232,9 +294,7 @@ impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Error::FontNotFound(font) => write!(f, "font {:?} not found", font),
-            Error::MissingGlyph(glyph) => {
-                write!(f, "glyph for character {:?} not found", glyph.character)
-            },
+            Error::MissingGlyph(glyph) => write!(f, "glyph for {:?} not found", glyph.id),
             Error::UnknownFontKey => f.write_str("invalid font key"),
             Error::MetricsNotFound => f.write_str("metrics not found"),
             Error::PlatformError(err) => write!(f, "{}", err),
@@ -259,4 +319,9 @@ pub trait Rasterize {
 
     /// Update the Rasterizer's DPI factor.
     fn update_dpr(&mut self, device_pixel_ratio: f32);
+
+    /// Get the path of a font by its key.
+    ///
+    /// This is useful when you want to load the font for another library.
+    fn font_path(&self, _: FontKey) -> Result<&Path, Error>;
 }

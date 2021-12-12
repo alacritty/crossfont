@@ -35,8 +35,8 @@ pub mod byte_order;
 use byte_order::kCGBitmapByteOrder32Host;
 
 use super::{
-    BitmapBuffer, Error, FontDesc, FontKey, GlyphKey, Metrics, RasterizedGlyph, Size, Slant, Style,
-    Weight,
+    BitmapBuffer, Error, FontDesc, FontKey, GlyphId, GlyphKey, Metrics, RasterizedGlyph, Size,
+    Slant, Style, Weight,
 };
 
 /// According to the documentation, the index of 0 must be a missing glyph character:
@@ -64,7 +64,7 @@ impl Descriptor {
             font_name: desc.font_name(),
             style_name: desc.style_name(),
             display_name: desc.display_name(),
-            font_path: desc.font_path().unwrap_or_else(PathBuf::new),
+            font_path: desc.font_path().unwrap_or_default(),
             ct_descriptor: desc,
         }
     }
@@ -89,11 +89,16 @@ impl Descriptor {
             // Investigate if we can actually use the .-prefixed
             // fallbacks somehow.
             if let Ok(apple_symbols) = new_from_name("Apple Symbols", size) {
-                fallbacks.push(Font {
+                let path = apple_symbols.copy_descriptor().font_path().unwrap_or_default();
+                let mut font = Font {
                     cg_font: apple_symbols.copy_to_CGFont(),
                     ct_font: apple_symbols,
                     fallbacks: Vec::new(),
-                })
+                    placeholder_glyph_index: 0,
+                    path,
+                };
+                font.placeholder_glyph_index = font.glyph_index(' ');
+                fallbacks.push(font);
             };
 
             fallbacks
@@ -101,7 +106,15 @@ impl Descriptor {
             Vec::new()
         };
 
-        Font { ct_font, cg_font, fallbacks }
+        let mut font = Font {
+            ct_font,
+            cg_font,
+            fallbacks,
+            placeholder_glyph_index: 0,
+            path: self.font_path.clone(),
+        };
+        font.placeholder_glyph_index = font.glyph_index(' ');
+        font
     }
 }
 
@@ -153,13 +166,27 @@ impl crate::Rasterize for Rasterizer {
         // Find a font where the given character is present.
         let (font, glyph_index) = iter::once(font)
             .chain(font.fallbacks.iter())
-            .find_map(|font| match font.glyph_index(glyph.character) {
-                MISSING_GLYPH_INDEX => None,
-                glyph_index => Some((font, glyph_index)),
+            .find_map(|font| {
+                if let Some(c) = glyph.id.as_char() {
+                    match font.glyph_index(c) {
+                        MISSING_GLYPH_INDEX => None,
+                        glyph_index => Some((font, glyph_index)),
+                    }
+                } else {
+                    let index = glyph.id.value();
+                    if index == 0 {
+                        match font.placeholder_glyph_index {
+                            MISSING_GLYPH_INDEX => None,
+                            glyph_index => Some((font, glyph_index)),
+                        }
+                    } else {
+                        Some((font, index))
+                    }
+                }
             })
             .unwrap_or((font, MISSING_GLYPH_INDEX));
 
-        let glyph = font.get_glyph(glyph.character, glyph_index, self.use_thin_strokes);
+        let glyph = font.get_glyph(glyph.id, glyph_index, self.use_thin_strokes);
 
         if glyph_index == MISSING_GLYPH_INDEX {
             Err(Error::MissingGlyph(glyph))
@@ -170,6 +197,10 @@ impl crate::Rasterize for Rasterizer {
 
     fn update_dpr(&mut self, device_pixel_ratio: f32) {
         self.device_pixel_ratio = device_pixel_ratio;
+    }
+
+    fn font_path(&self, key: FontKey) -> Result<&std::path::Path, Error> {
+        self.fonts.get(&key).ok_or(Error::UnknownFontKey).map(|font| font.path.as_path())
     }
 }
 
@@ -315,6 +346,8 @@ pub struct Font {
     ct_font: CTFont,
     cg_font: CGFont,
     fallbacks: Vec<Font>,
+    placeholder_glyph_index: u32,
+    path: PathBuf,
 }
 
 unsafe impl Send for Font {}
@@ -375,7 +408,7 @@ impl Font {
 
     pub fn get_glyph(
         &self,
-        character: char,
+        id: GlyphId,
         glyph_index: u32,
         use_thin_strokes: bool,
     ) -> RasterizedGlyph {
@@ -391,14 +424,7 @@ impl Font {
         let rasterized_height = (rasterized_descent + rasterized_ascent) as u32;
 
         if rasterized_width == 0 || rasterized_height == 0 {
-            return RasterizedGlyph {
-                character: ' ',
-                width: 0,
-                height: 0,
-                top: 0,
-                left: 0,
-                buffer: BitmapBuffer::Rgb(Vec::new()),
-            };
+            return RasterizedGlyph::default();
         }
 
         let mut cg_context = CGContext::create_bitmap_context(
@@ -457,7 +483,7 @@ impl Font {
         };
 
         RasterizedGlyph {
-            character,
+            id,
             left: rasterized_left,
             top: (bounds.size.height + bounds.origin.y).ceil() as i32,
             width: rasterized_width as i32,
@@ -498,6 +524,8 @@ impl Font {
 
 #[cfg(test)]
 mod tests {
+    use crate::GlyphId;
+
     use super::BitmapBuffer;
 
     #[test]
@@ -520,7 +548,7 @@ mod tests {
             // Get a glyph.
             for character in &['a', 'b', 'c', 'd'] {
                 let glyph_index = font.glyph_index(*character);
-                let glyph = font.get_glyph(*character, glyph_index, false);
+                let glyph = font.get_glyph(GlyphId::char(*character), glyph_index, false);
 
                 let buffer = match &glyph.buffer {
                     BitmapBuffer::Rgb(buffer) | BitmapBuffer::Rgba(buffer) => buffer,

@@ -3,6 +3,7 @@
 use std::cmp::{min, Ordering};
 use std::collections::HashMap;
 use std::fmt::{self, Formatter};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -53,7 +54,7 @@ struct FallbackList {
     coverage: CharSet,
 }
 
-struct FaceLoadingProperties {
+pub struct FaceLoadingProperties {
     load_flags: LoadFlag,
     render_mode: freetype::RenderMode,
     lcd_filter: c_uint,
@@ -64,6 +65,7 @@ struct FaceLoadingProperties {
     pixelsize_fixup_factor: Option<f64>,
     ft_face: Rc<FtFace>,
     rgba: Rgba,
+    placeholder_glyph_index: u32,
 }
 
 impl fmt::Debug for FaceLoadingProperties {
@@ -116,7 +118,7 @@ impl Rasterize for FreeTypeRasterizer {
     }
 
     fn metrics(&self, key: FontKey, _size: Size) -> Result<Metrics, Error> {
-        let face = &mut self.loader.faces.get(&key).ok_or(Error::UnknownFontKey)?;
+        let face = &self.loader.faces.get(&key).ok_or(Error::UnknownFontKey)?.0;
         let full = self.full_metrics(face)?;
 
         let ascent = (full.size_metrics.ascender / 64) as f32;
@@ -178,6 +180,10 @@ impl Rasterize for FreeTypeRasterizer {
 
     fn update_dpr(&mut self, device_pixel_ratio: f32) {
         self.device_pixel_ratio = device_pixel_ratio;
+    }
+
+    fn font_path(&self, key: FontKey) -> Result<&std::path::Path, Error> {
+        self.loader.faces.get(&key).ok_or(Error::UnknownFontKey).map(|(_, path)| path.as_path())
     }
 }
 
@@ -297,11 +303,13 @@ impl FreeTypeRasterizer {
     }
 
     fn face_for_glyph(&mut self, glyph_key: GlyphKey) -> FontKey {
-        if let Some(face) = self.loader.faces.get(&glyph_key.font_key) {
-            let index = face.ft_face.get_char_index(glyph_key.character as usize);
+        if let Some(c) = glyph_key.id.as_char() {
+            if let Some(face) = self.loader.faces.get(&glyph_key.font_key) {
+                let index = face.0.ft_face.get_char_index(c as usize);
 
-            if index != 0 {
-                return glyph_key.font_key;
+                if index != 0 {
+                    return glyph_key.font_key;
+                }
             }
         }
 
@@ -309,10 +317,16 @@ impl FreeTypeRasterizer {
     }
 
     fn load_face_with_glyph(&mut self, glyph: GlyphKey) -> Result<FontKey, Error> {
+        let c = if let Some(c) = glyph.id.as_char() {
+            c
+        } else {
+            return Ok(glyph.font_key);
+        };
+
         let fallback_list = self.fallback_lists.get(&glyph.font_key).unwrap();
 
         // Check whether glyph is presented in any fallback font.
-        if !fallback_list.coverage.has_char(glyph.character) {
+        if !fallback_list.coverage.has_char(c) {
             return Ok(glyph.font_key);
         }
 
@@ -321,7 +335,7 @@ impl FreeTypeRasterizer {
             let font_pattern = &fallback_font.pattern;
             match self.loader.faces.get(&font_key) {
                 Some(face) => {
-                    let index = face.ft_face.get_char_index(glyph.character as usize);
+                    let index = face.0.ft_face.get_char_index(c as usize);
 
                     // We found something in a current face, so let's use it.
                     if index != 0 {
@@ -329,8 +343,7 @@ impl FreeTypeRasterizer {
                     }
                 },
                 None => {
-                    if !font_pattern.get_charset().map_or(false, |cs| cs.has_char(glyph.character))
-                    {
+                    if !font_pattern.get_charset().map_or(false, |cs| cs.has_char(c)) {
                         continue;
                     }
 
@@ -349,8 +362,19 @@ impl FreeTypeRasterizer {
     fn get_rendered_glyph(&mut self, glyph_key: GlyphKey) -> Result<RasterizedGlyph, Error> {
         // Render a normal character if it's not a cursor.
         let font_key = self.face_for_glyph(glyph_key);
-        let face = &self.loader.faces[&font_key];
-        let index = face.ft_face.get_char_index(glyph_key.character as usize) as u32;
+        let face = &self.loader.faces[&font_key].0;
+
+        let index = if let Some(c) = glyph_key.id.as_char() {
+            face.ft_face.get_char_index(c as usize) as u32
+        } else {
+            let val = glyph_key.id.value();
+            if val == 0 {
+                face.placeholder_glyph_index
+            } else {
+                val
+            }
+        };
+
         let pixelsize = face
             .non_scalable
             .unwrap_or_else(|| glyph_key.size.as_f32_pts() * self.device_pixel_ratio * 96. / 72.);
@@ -399,7 +423,7 @@ impl FreeTypeRasterizer {
             Self::normalize_buffer(&glyph.bitmap(), &face.rgba)?;
 
         let mut rasterized_glyph = RasterizedGlyph {
-            character: glyph_key.character,
+            id: glyph_key.id,
             top: glyph.bitmap_top(),
             left: glyph.bitmap_left(),
             width: pixel_width,
@@ -612,9 +636,9 @@ impl From<freetype::Error> for Error {
 
 unsafe impl Send for FreeTypeRasterizer {}
 
-struct FreeTypeLoader {
+pub struct FreeTypeLoader {
     library: Library,
-    faces: HashMap<FontKey, FaceLoadingProperties>,
+    faces: HashMap<FontKey, (FaceLoadingProperties, PathBuf)>,
     ft_faces: HashMap<FtFaceLocation, Rc<FtFace>>,
 }
 
@@ -660,8 +684,12 @@ impl FreeTypeLoader {
 
             let ft_face = match self.ft_faces.get(&ft_face_location) {
                 Some(ft_face) => Rc::clone(ft_face),
-                None => self.load_ft_face(ft_face_location)?,
+                None => self.load_ft_face(ft_face_location.clone())?,
             };
+
+            // This will be different for each font so we can't use a constant but we don't want to
+            // look it up every time so we cache it on font load.
+            let placeholder_glyph_index = ft_face.get_char_index(' ' as usize);
 
             let non_scalable = if pattern.scalable().next().unwrap_or(true) {
                 None
@@ -696,11 +724,12 @@ impl FreeTypeLoader {
                 pixelsize_fixup_factor,
                 ft_face,
                 rgba,
+                placeholder_glyph_index,
             };
 
             debug!("Loaded Face {:?}", face);
 
-            self.faces.insert(font_key, face);
+            self.faces.insert(font_key, (face, ft_face_location.path));
 
             Ok(Some(font_key))
         } else {
