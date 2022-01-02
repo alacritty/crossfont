@@ -4,7 +4,7 @@
 //! FreeType is used on everything that's not Mac OS.
 //! Eventually, ClearType support will be available for windows.
 
-#![deny(clippy::all, clippy::if_not_else, clippy::enum_glob_use, clippy::wrong_pub_self_convention)]
+#![deny(clippy::all, clippy::if_not_else, clippy::enum_glob_use)]
 
 use std::fmt::{self, Display, Formatter};
 use std::ops::{Add, Mul};

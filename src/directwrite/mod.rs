@@ -234,7 +234,7 @@ impl crate::Rasterize for DirectWriteRasterizer {
         let mut font = loaded_font;
         let mut glyph_index = self.get_glyph_index(&loaded_font.face, glyph.character);
         if glyph_index == MISSING_GLYPH_INDEX {
-            if let Some(fallback_font) = self.get_fallback_font(&loaded_font, glyph.character) {
+            if let Some(fallback_font) = self.get_fallback_font(loaded_font, glyph.character) {
                 loaded_fallback_font = Font::from(fallback_font);
                 glyph_index = self.get_glyph_index(&loaded_fallback_font.face, glyph.character);
                 font = &loaded_fallback_font;
