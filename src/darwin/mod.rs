@@ -275,8 +275,7 @@ pub fn get_family_names() -> Vec<String> {
 fn cascade_list_for_languages(ct_font: &CTFont, languages: &[String]) -> Vec<Descriptor> {
     // Convert language type &Vec<String> -> CFArray.
     let langarr: CFArray<CFString> = {
-        let tmp: Vec<CFString> =
-            languages.iter().map(|language| CFString::new(&language)).collect();
+        let tmp: Vec<CFString> = languages.iter().map(|language| CFString::new(language)).collect();
         CFArray::from_CFTypes(&tmp)
     };
 

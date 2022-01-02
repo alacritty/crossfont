@@ -310,7 +310,7 @@ mod tests {
         let fonts = super::font_sort(config, &pattern).expect("sort font monospace");
 
         for font in fonts.into_iter().take(10) {
-            let font = pattern.render_prepare(&config, &font);
+            let font = pattern.render_prepare(config, font);
             print!("index={:?}; ", font.index());
             print!("family={:?}; ", font.family());
             print!("style={:?}; ", font.style());
@@ -334,7 +334,7 @@ mod tests {
         let fonts = super::font_sort(config, &pattern).expect("font_sort");
 
         for font in fonts.into_iter().take(10) {
-            let font = pattern.render_prepare(&config, &font);
+            let font = pattern.render_prepare(config, font);
             print!("index={:?}; ", font.index());
             print!("family={:?}; ", font.family());
             print!("style={:?}; ", font.style());
