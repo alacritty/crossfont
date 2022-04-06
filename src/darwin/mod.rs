@@ -168,6 +168,10 @@ impl crate::Rasterize for Rasterizer {
         }
     }
 
+    fn kerning(&mut self, left: GlyphKey, right: GlyphKey) -> (f32, f32) {
+        (0., 0.)
+    }
+
     fn update_dpr(&mut self, device_pixel_ratio: f32) {
         self.device_pixel_ratio = device_pixel_ratio;
     }
@@ -396,6 +400,7 @@ impl Font {
                 height: 0,
                 top: 0,
                 left: 0,
+                advance: (0, 0),
                 buffer: BitmapBuffer::Rgb(Vec::new()),
             };
         }
@@ -461,6 +466,7 @@ impl Font {
             top: (bounds.size.height + bounds.origin.y).ceil() as i32,
             width: rasterized_width as i32,
             height: rasterized_height as i32,
+            advance: (0, 0),
             buffer,
         }
     }

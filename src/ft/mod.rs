@@ -173,7 +173,109 @@ impl Rasterize for FreeTypeRasterizer {
     }
 
     fn get_glyph(&mut self, glyph_key: GlyphKey) -> Result<RasterizedGlyph, Error> {
-        self.get_rendered_glyph(glyph_key)
+        // Render a normal character if it's not a cursor.
+        let font_key = self.face_for_glyph(glyph_key);
+        let face = &self.loader.faces[&font_key];
+        let index = face.ft_face.get_char_index(glyph_key.character as usize);
+        let pixelsize = face
+            .non_scalable
+            .unwrap_or_else(|| glyph_key.size.as_f32_pts() * self.device_pixel_ratio * 96. / 72.);
+
+        if !face.colored {
+            face.ft_face.set_char_size(to_freetype_26_6(pixelsize), 0, 0, 0)?;
+        }
+
+        unsafe {
+            let ft_lib = self.loader.library.raw();
+            freetype::ffi::FT_Library_SetLcdFilter(ft_lib, face.lcd_filter);
+        }
+
+        face.ft_face.load_glyph(index, face.load_flags)?;
+
+        let glyph = face.ft_face.glyph();
+
+        // Generate synthetic bold.
+        if face.embolden {
+            unsafe {
+                freetype_sys::FT_GlyphSlot_Embolden(glyph.raw()
+                    as *const freetype_sys::FT_GlyphSlotRec
+                    as *mut freetype_sys::FT_GlyphSlotRec);
+            }
+        }
+
+        // Transform glyphs with the matrix from Fontconfig. Primarily used to generate italics.
+        let advance = unsafe {
+            let raw_glyph = face.ft_face.raw().glyph;
+            if let Some(matrix) = face.matrix.as_ref() {
+                // Check that the glyph is a vectorial outline, not a bitmap.
+                if (*raw_glyph).format == freetype_sys::FT_GLYPH_FORMAT_OUTLINE {
+                    let outline = &(*raw_glyph).outline;
+
+                    freetype_sys::FT_Outline_Transform(outline, matrix);
+                }
+            }
+
+            // Don't render bitmap glyphs, it results in error with freestype 2.11.0.
+            if (*raw_glyph).format != freetype_sys::FT_GLYPH_FORMAT_BITMAP {
+                glyph.render_glyph(face.render_mode)?;
+            }
+
+            let advance = (*raw_glyph).advance;
+            (advance.x as i32 / 64, advance.y as i32 / 64)
+        };
+
+        let (pixel_height, pixel_width, buffer) =
+            Self::normalize_buffer(&glyph.bitmap(), &face.rgba)?;
+
+        let mut rasterized_glyph = RasterizedGlyph {
+            character: glyph_key.character,
+            top: glyph.bitmap_top(),
+            left: glyph.bitmap_left(),
+            width: pixel_width,
+            height: pixel_height,
+            advance,
+            buffer,
+        };
+
+        if index == MISSING_GLYPH_INDEX {
+            Err(Error::MissingGlyph(rasterized_glyph))
+        } else {
+            if face.colored {
+                let fixup_factor = match face.pixelsize_fixup_factor {
+                    Some(fixup_factor) => fixup_factor,
+                    None => {
+                        // Fallback if the user has bitmap scaling disabled.
+                        let metrics = face.ft_face.size_metrics().ok_or(Error::MetricsNotFound)?;
+                        f64::from(pixelsize) / f64::from(metrics.y_ppem)
+                    },
+                };
+
+                rasterized_glyph = downsample_bitmap(rasterized_glyph, fixup_factor);
+            }
+
+            Ok(rasterized_glyph)
+        }
+    }
+
+    fn kerning(&mut self, left: GlyphKey, right: GlyphKey) -> (f32, f32) {
+        let font_key = self.face_for_glyph(left);
+        let mut ft_face = (*self.loader.faces[&font_key].ft_face).clone();
+
+        if !freetype_sys::FT_HAS_KERNING(ft_face.raw_mut()) {
+            return (0., 0.);
+        }
+
+        let left = ft_face.get_char_index(left.character as usize);
+        let right = ft_face.get_char_index(right.character as usize);
+
+        let mut kerning = freetype_sys::FT_Vector::default();
+        let mode = freetype_sys::FT_KERNING_DEFAULT;
+
+        unsafe {
+            freetype_sys::FT_Get_Kerning(ft_face.raw_mut(), left, right, mode, &mut kerning);
+        }
+
+        (kerning.x as f32 / 64., kerning.y as f32 / 64.)
     }
 
     fn update_dpr(&mut self, device_pixel_ratio: f32) {
@@ -344,87 +446,6 @@ impl FreeTypeRasterizer {
 
         // You can hit this return, if you're failing to get charset from a pattern.
         Ok(glyph.font_key)
-    }
-
-    fn get_rendered_glyph(&mut self, glyph_key: GlyphKey) -> Result<RasterizedGlyph, Error> {
-        // Render a normal character if it's not a cursor.
-        let font_key = self.face_for_glyph(glyph_key);
-        let face = &self.loader.faces[&font_key];
-        let index = face.ft_face.get_char_index(glyph_key.character as usize) as u32;
-        let pixelsize = face
-            .non_scalable
-            .unwrap_or_else(|| glyph_key.size.as_f32_pts() * self.device_pixel_ratio * 96. / 72.);
-
-        if !face.colored {
-            face.ft_face.set_char_size(to_freetype_26_6(pixelsize), 0, 0, 0)?;
-        }
-
-        unsafe {
-            let ft_lib = self.loader.library.raw();
-            freetype::ffi::FT_Library_SetLcdFilter(ft_lib, face.lcd_filter);
-        }
-
-        face.ft_face.load_glyph(index, face.load_flags)?;
-
-        let glyph = face.ft_face.glyph();
-
-        // Generate synthetic bold.
-        if face.embolden {
-            unsafe {
-                freetype_sys::FT_GlyphSlot_Embolden(glyph.raw()
-                    as *const freetype_sys::FT_GlyphSlotRec
-                    as *mut freetype_sys::FT_GlyphSlotRec);
-            }
-        }
-
-        // Transform glyphs with the matrix from Fontconfig. Primarily used to generate italics.
-        unsafe {
-            let raw_glyph = face.ft_face.raw().glyph;
-            if let Some(matrix) = face.matrix.as_ref() {
-                // Check that the glyph is a vectorial outline, not a bitmap.
-                if (*raw_glyph).format == freetype_sys::FT_GLYPH_FORMAT_OUTLINE {
-                    let outline = &(*raw_glyph).outline;
-
-                    freetype_sys::FT_Outline_Transform(outline, matrix);
-                }
-            }
-
-            // Don't render bitmap glyphs, it results in error with freestype 2.11.0.
-            if (*raw_glyph).format != freetype_sys::FT_GLYPH_FORMAT_BITMAP {
-                glyph.render_glyph(face.render_mode)?;
-            }
-        }
-
-        let (pixel_height, pixel_width, buffer) =
-            Self::normalize_buffer(&glyph.bitmap(), &face.rgba)?;
-
-        let mut rasterized_glyph = RasterizedGlyph {
-            character: glyph_key.character,
-            top: glyph.bitmap_top(),
-            left: glyph.bitmap_left(),
-            width: pixel_width,
-            height: pixel_height,
-            buffer,
-        };
-
-        if index == MISSING_GLYPH_INDEX {
-            Err(Error::MissingGlyph(rasterized_glyph))
-        } else {
-            if face.colored {
-                let fixup_factor = match face.pixelsize_fixup_factor {
-                    Some(fixup_factor) => fixup_factor,
-                    None => {
-                        // Fallback if the user has bitmap scaling disabled.
-                        let metrics = face.ft_face.size_metrics().ok_or(Error::MetricsNotFound)?;
-                        f64::from(pixelsize) / f64::from(metrics.y_ppem)
-                    },
-                };
-
-                rasterized_glyph = downsample_bitmap(rasterized_glyph, fixup_factor);
-            }
-
-            Ok(rasterized_glyph)
-        }
     }
 
     /// Given a FreeType `Bitmap`, returns packed buffer with 1 byte per LCD channel.

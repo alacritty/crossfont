@@ -90,6 +90,7 @@ impl DirectWriteRasterizer {
             height: (bounds.bottom - bounds.top) as i32,
             top: -bounds.top,
             left: bounds.left,
+            advance: (0, 0),
             buffer,
         })
     }
@@ -249,6 +250,10 @@ impl crate::Rasterize for DirectWriteRasterizer {
         } else {
             Ok(rasterized_glyph)
         }
+    }
+
+    fn kerning(&mut self, left: GlyphKey, right: GlyphKey) -> (f32, f32) {
+        (0., 0.)
     }
 
     fn update_dpr(&mut self, device_pixel_ratio: f32) {
