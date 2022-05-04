@@ -203,8 +203,8 @@ impl Rasterize for FreeTypeRasterizer {
             }
         }
 
-        // Transform glyphs with the matrix from Fontconfig. Primarily used to generate italics.
         let advance = unsafe {
+            // Transform glyphs with the matrix from Fontconfig. Primarily used to generate italics.
             let raw_glyph = face.ft_face.raw().glyph;
             if let Some(matrix) = face.matrix.as_ref() {
                 // Check that the glyph is a vectorial outline, not a bitmap.
@@ -249,6 +249,10 @@ impl Rasterize for FreeTypeRasterizer {
                         f64::from(pixelsize) / f64::from(metrics.y_ppem)
                     },
                 };
+
+                // Scale glyph advance.
+                rasterized_glyph.advance.0 = (advance.0 as f64 * fixup_factor).round() as i32;
+                rasterized_glyph.advance.1 = (advance.1 as f64 * fixup_factor).round() as i32;
 
                 rasterized_glyph = downsample_bitmap(rasterized_glyph, fixup_factor);
             }
