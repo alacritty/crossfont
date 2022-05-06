@@ -105,6 +105,27 @@ fn to_fixedpoint_16_6(f: f64) -> c_long {
     (f * 65536.0) as c_long
 }
 
+#[inline]
+fn from_freetype_26_6(f: impl IntoF32) -> f32 {
+    f.into_f32() / 64.
+}
+
+trait IntoF32 {
+    fn into_f32(self) -> f32;
+}
+
+impl IntoF32 for f32 {
+    fn into_f32(self) -> f32 {
+        self
+    }
+}
+
+impl IntoF32 for i64 {
+    fn into_f32(self) -> f32 {
+        self as f32
+    }
+}
+
 impl Rasterize for FreeTypeRasterizer {
     fn new(device_pixel_ratio: f32, _: bool) -> Result<FreeTypeRasterizer, Error> {
         Ok(FreeTypeRasterizer {
@@ -119,16 +140,18 @@ impl Rasterize for FreeTypeRasterizer {
         let face = &mut self.loader.faces.get(&key).ok_or(Error::UnknownFontKey)?;
         let full = self.full_metrics(face)?;
 
-        let ascent = (full.size_metrics.ascender / 64) as f32;
-        let descent = (full.size_metrics.descender / 64) as f32;
-        let glyph_height = (full.size_metrics.height / 64) as f64;
+        let ascent = from_freetype_26_6(full.size_metrics.ascender);
+        let descent = from_freetype_26_6(full.size_metrics.descender);
+        let glyph_height = from_freetype_26_6(full.size_metrics.height) as f64;
         let global_glyph_height = (ascent - descent) as f64;
         let height = f64::max(glyph_height, global_glyph_height);
 
         // Get underline position and thickness in device pixels.
         let x_scale = full.size_metrics.x_scale as f32 / 65536.0;
-        let mut underline_position = f32::from(face.ft_face.underline_position()) * x_scale / 64.;
-        let mut underline_thickness = f32::from(face.ft_face.underline_thickness()) * x_scale / 64.;
+        let ft_underline_position = face.ft_face.underline_position();
+        let mut underline_position = from_freetype_26_6(ft_underline_position as f32 * x_scale);
+        let ft_underline_thickness = face.ft_face.underline_thickness();
+        let mut underline_thickness = from_freetype_26_6(ft_underline_thickness as f32 * x_scale);
 
         // Fallback for bitmap fonts which do not provide underline metrics.
         if underline_position == 0. {
@@ -139,11 +162,10 @@ impl Rasterize for FreeTypeRasterizer {
         // Get strikeout position and thickness in device pixels.
         let (strikeout_position, strikeout_thickness) =
             match TrueTypeOS2Table::from_face(&mut (*face.ft_face).clone()) {
-                Some(os2) => {
-                    let strikeout_position = f32::from(os2.y_strikeout_position()) * x_scale / 64.;
-                    let strikeout_thickness = f32::from(os2.y_strikeout_size()) * x_scale / 64.;
-                    (strikeout_position, strikeout_thickness)
-                },
+                Some(os2) => (
+                    from_freetype_26_6(os2.y_strikeout_position() as f32 * x_scale),
+                    from_freetype_26_6(os2.y_strikeout_size() as f32 * x_scale),
+                ),
                 _ => {
                     // Fallback if font doesn't provide info about strikeout.
                     trace!("Using fallback strikeout metrics");
@@ -173,7 +195,6 @@ impl Rasterize for FreeTypeRasterizer {
     }
 
     fn get_glyph(&mut self, glyph_key: GlyphKey) -> Result<RasterizedGlyph, Error> {
-        // Render a normal character if it's not a cursor.
         let font_key = self.face_for_glyph(glyph_key);
         let face = &self.loader.faces[&font_key];
         let index = face.ft_face.get_char_index(glyph_key.character as usize);
@@ -221,7 +242,7 @@ impl Rasterize for FreeTypeRasterizer {
             }
 
             let advance = (*raw_glyph).advance;
-            (advance.x as i32 / 64, advance.y as i32 / 64)
+            (from_freetype_26_6(advance.x) as i32, from_freetype_26_6(advance.y) as i32)
         };
 
         let (pixel_height, pixel_width, buffer) =
@@ -238,27 +259,27 @@ impl Rasterize for FreeTypeRasterizer {
         };
 
         if index == MISSING_GLYPH_INDEX {
-            Err(Error::MissingGlyph(rasterized_glyph))
-        } else {
-            if face.colored {
-                let fixup_factor = match face.pixelsize_fixup_factor {
-                    Some(fixup_factor) => fixup_factor,
-                    None => {
-                        // Fallback if the user has bitmap scaling disabled.
-                        let metrics = face.ft_face.size_metrics().ok_or(Error::MetricsNotFound)?;
-                        f64::from(pixelsize) / f64::from(metrics.y_ppem)
-                    },
-                };
-
-                // Scale glyph advance.
-                rasterized_glyph.advance.0 = (advance.0 as f64 * fixup_factor).round() as i32;
-                rasterized_glyph.advance.1 = (advance.1 as f64 * fixup_factor).round() as i32;
-
-                rasterized_glyph = downsample_bitmap(rasterized_glyph, fixup_factor);
-            }
-
-            Ok(rasterized_glyph)
+            return Err(Error::MissingGlyph(rasterized_glyph));
         }
+
+        if face.colored {
+            let fixup_factor = match face.pixelsize_fixup_factor {
+                Some(fixup_factor) => fixup_factor,
+                None => {
+                    // Fallback if the user has bitmap scaling disabled.
+                    let metrics = face.ft_face.size_metrics().ok_or(Error::MetricsNotFound)?;
+                    f64::from(pixelsize) / f64::from(metrics.y_ppem)
+                },
+            };
+
+            // Scale glyph advance.
+            rasterized_glyph.advance.0 = (advance.0 as f64 * fixup_factor).round() as i32;
+            rasterized_glyph.advance.1 = (advance.1 as f64 * fixup_factor).round() as i32;
+
+            rasterized_glyph = downsample_bitmap(rasterized_glyph, fixup_factor);
+        }
+
+        Ok(rasterized_glyph)
     }
 
     fn kerning(&mut self, left: GlyphKey, right: GlyphKey) -> (f32, f32) {
@@ -279,7 +300,7 @@ impl Rasterize for FreeTypeRasterizer {
             freetype_sys::FT_Get_Kerning(ft_face.raw_mut(), left, right, mode, &mut kerning);
         }
 
-        (kerning.x as f32 / 64., kerning.y as f32 / 64.)
+        (from_freetype_26_6(kerning.x), from_freetype_26_6(kerning.y))
     }
 
     fn update_dpr(&mut self, device_pixel_ratio: f32) {
@@ -395,11 +416,11 @@ impl FreeTypeRasterizer {
         let size_metrics = ft_face.size_metrics().ok_or(Error::MetricsNotFound)?;
 
         let width = match ft_face.load_char('0' as usize, face_load_props.load_flags) {
-            Ok(_) => ft_face.glyph().metrics().horiAdvance / 64,
-            Err(_) => size_metrics.max_advance / 64,
-        } as f64;
+            Ok(_) => from_freetype_26_6(ft_face.glyph().metrics().horiAdvance),
+            Err(_) => from_freetype_26_6(size_metrics.max_advance),
+        };
 
-        Ok(FullMetrics { size_metrics, cell_width: width })
+        Ok(FullMetrics { size_metrics, cell_width: width as f64 })
     }
 
     fn face_for_glyph(&mut self, glyph_key: GlyphKey) -> FontKey {
@@ -463,7 +484,7 @@ impl FreeTypeRasterizer {
 
         let buf = bitmap.buffer();
         let mut packed = Vec::with_capacity((bitmap.rows() * bitmap.width()) as usize);
-        let pitch = bitmap.pitch().abs() as usize;
+        let pitch = bitmap.pitch().unsigned_abs() as usize;
         match bitmap.pixel_mode()? {
             PixelMode::Lcd => {
                 for i in 0..bitmap.rows() {
@@ -517,7 +538,7 @@ impl FreeTypeRasterizer {
                 for i in 0..(bitmap.rows() as usize) {
                     let mut columns = bitmap.width();
                     let mut byte = 0;
-                    let offset = i * bitmap.pitch().abs() as usize;
+                    let offset = i * bitmap.pitch().unsigned_abs() as usize;
                     while columns != 0 {
                         let bits = min(8, columns);
                         unpack_byte(&mut packed, buf[offset + byte], bits as u8);
