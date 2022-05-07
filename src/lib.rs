@@ -147,13 +147,14 @@ impl From<f32> for Size {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct RasterizedGlyph {
     pub character: char,
     pub width: i32,
     pub height: i32,
     pub top: i32,
     pub left: i32,
+    pub advance: (i32, i32),
     pub buffer: BitmapBuffer,
 }
 
@@ -174,25 +175,13 @@ impl Default for RasterizedGlyph {
             height: 0,
             top: 0,
             left: 0,
+            advance: (0, 0),
             buffer: BitmapBuffer::Rgb(Vec::new()),
         }
     }
 }
 
-impl fmt::Debug for RasterizedGlyph {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("RasterizedGlyph")
-            .field("character", &self.character)
-            .field("width", &self.width)
-            .field("height", &self.height)
-            .field("top", &self.top)
-            .field("left", &self.left)
-            .field("buffer", &self.buffer)
-            .finish()
-    }
-}
-
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct Metrics {
     pub average_advance: f64,
     pub line_height: f64,
@@ -259,4 +248,7 @@ pub trait Rasterize {
 
     /// Update the Rasterizer's DPI factor.
     fn update_dpr(&mut self, device_pixel_ratio: f32);
+
+    /// Kerning between two characters.
+    fn kerning(&mut self, left: GlyphKey, right: GlyphKey) -> (f32, f32);
 }

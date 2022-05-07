@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- FreeType proportional font metrics using `RasterizedGlyph::advance` and `Rasterize::kerning`
+
 ### Changed
 
 - Minimum Rust version has been bumped to 1.56.0
