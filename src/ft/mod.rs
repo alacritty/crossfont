@@ -120,6 +120,12 @@ impl IntoF32 for f32 {
     }
 }
 
+impl IntoF32 for i32 {
+    fn into_f32(self) -> f32 {
+        self as f32
+    }
+}
+
 impl IntoF32 for i64 {
     fn into_f32(self) -> f32 {
         self as f32
