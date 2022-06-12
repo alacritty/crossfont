@@ -297,7 +297,10 @@ fn cascade_list_for_languages(ct_font: &CTFont, languages: &[String]) -> Vec<Des
     let list = ct_cascade_list_for_languages(ct_font, &langarr);
 
     // Convert CFArray to Vec<Descriptor>.
-    list.into_iter().map(|fontdesc| Descriptor::new(fontdesc.clone())).collect()
+    list.into_iter()
+        .filter(|fontdesc| fontdesc.is_enabled())
+        .map(|fontdesc| Descriptor::new(fontdesc.clone()))
+        .collect()
 }
 
 /// Get descriptors for family name.
