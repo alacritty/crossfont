@@ -7,6 +7,8 @@ use std::path::PathBuf;
 use std::ptr;
 
 use core_foundation::array::{CFArray, CFIndex};
+use core_foundation::base::{CFType, ItemRef, TCFType};
+use core_foundation::number::{CFNumber, CFNumberRef};
 use core_foundation::string::CFString;
 use core_graphics::base::kCGImageAlphaPremultipliedFirst;
 use core_graphics::color_space::CGColorSpace;
@@ -19,8 +21,10 @@ use core_text::font::{
 };
 use core_text::font_collection::create_for_family;
 use core_text::font_collection::get_family_names as ct_get_family_names;
+use core_text::font_descriptor;
 use core_text::font_descriptor::kCTFontColorGlyphsTrait;
 use core_text::font_descriptor::kCTFontDefaultOrientation;
+use core_text::font_descriptor::kCTFontEnabledAttribute;
 use core_text::font_descriptor::kCTFontHorizontalOrientation;
 use core_text::font_descriptor::kCTFontVerticalOrientation;
 use core_text::font_descriptor::SymbolicTraitAccessors;
@@ -168,7 +172,7 @@ impl crate::Rasterize for Rasterizer {
         }
     }
 
-    fn kerning(&mut self, left: GlyphKey, right: GlyphKey) -> (f32, f32) {
+    fn kerning(&mut self, _left: GlyphKey, _right: GlyphKey) -> (f32, f32) {
         (0., 0.)
     }
 
@@ -287,7 +291,25 @@ fn cascade_list_for_languages(ct_font: &CTFont, languages: &[String]) -> Vec<Des
     let list = ct_cascade_list_for_languages(ct_font, &langarr);
 
     // Convert CFArray to Vec<Descriptor>.
-    list.into_iter().map(|fontdesc| Descriptor::new(fontdesc.clone())).collect()
+    list.into_iter().filter(is_enabled).map(|fontdesc| Descriptor::new(fontdesc.clone())).collect()
+}
+
+/// Check if a font is enabled.
+fn is_enabled(fontdesc: &ItemRef<'_, CTFontDescriptor>) -> bool {
+    unsafe {
+        let descriptor = fontdesc.as_concrete_TypeRef();
+        let attr_val =
+            font_descriptor::CTFontDescriptorCopyAttribute(descriptor, kCTFontEnabledAttribute);
+
+        if attr_val.is_null() {
+            return false;
+        }
+
+        let attr_val = CFType::wrap_under_create_rule(attr_val);
+        let attr_val = CFNumber::wrap_under_get_rule(attr_val.as_CFTypeRef() as CFNumberRef);
+
+        attr_val.to_i32().unwrap_or(0) != 0
+    }
 }
 
 /// Get descriptors for family name.
