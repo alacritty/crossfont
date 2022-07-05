@@ -133,7 +133,7 @@ impl IntoF32 for i64 {
 }
 
 impl Rasterize for FreeTypeRasterizer {
-    fn new(device_pixel_ratio: f32, _: bool) -> Result<FreeTypeRasterizer, Error> {
+    fn new(device_pixel_ratio: f32) -> Result<FreeTypeRasterizer, Error> {
         Ok(FreeTypeRasterizer {
             loader: FreeTypeLoader::new()?,
             fallback_lists: HashMap::new(),
