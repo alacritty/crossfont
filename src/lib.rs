@@ -1,8 +1,8 @@
 //! Compatibility layer for different font engines.
 //!
-//! CoreText is used on Mac OS.
-//! FreeType is used on everything that's not Mac OS.
-//! Eventually, ClearType support will be available for windows.
+//! CoreText is used on macOS.
+//! DirectWrite is used on Windows.
+//! FreeType is used everywhere else.
 
 #![deny(clippy::all, clippy::if_not_else, clippy::enum_glob_use)]
 
@@ -10,7 +10,6 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::{Add, Mul};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-// If target isn't macos or windows, reexport everything from ft.
 #[cfg(not(any(target_os = "macos", windows)))]
 pub mod ft;
 #[cfg(not(any(target_os = "macos", windows)))]
@@ -21,11 +20,10 @@ pub mod directwrite;
 #[cfg(windows)]
 pub use directwrite::DirectWriteRasterizer as Rasterizer;
 
-// If target is macos, reexport everything from darwin.
 #[cfg(target_os = "macos")]
-mod darwin;
+pub mod darwin;
 #[cfg(target_os = "macos")]
-pub use darwin::*;
+pub use darwin::CoreTextRasterizer as Rasterizer;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FontDesc {
@@ -233,7 +231,7 @@ impl Display for Error {
 
 pub trait Rasterize {
     /// Create a new Rasterizer.
-    fn new(device_pixel_ratio: f32, use_thin_strokes: bool) -> Result<Self, Error>
+    fn new(device_pixel_ratio: f32) -> Result<Self, Error>
     where
         Self: Sized;
 

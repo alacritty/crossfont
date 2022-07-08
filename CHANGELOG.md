@@ -6,6 +6,26 @@ The sections should follow the order `Added`, `Changed`, `Fixed`, and `Removed`.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- On macOS, use the `AppleFontSmoothing` user default to decide whether fonts should be "smoothed"
+
+### Changed
+
+- Renamed `darwin::Rasterizer` to `darwin::CoreTextRasterizer`
+
+### Fixed
+
+- On macOS, `use_thin_strokes` and `set_font_smoothing` did not work since Big Sur
+
+### Removed
+
+- `use_thin_strokes` parameter from `Rasterize::new` trait method
+- `set_font_smoothing` from the `darwin` module
+- `get_family_names` from the `darwin` module
+
 ## 0.4.2
 
 ### Fixed
@@ -16,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fix 32-bit build with FreeType/Fontconfig backend.
+- Fix 32-bit build with FreeType/Fontconfig backend
 
 ## 0.4.0
 
