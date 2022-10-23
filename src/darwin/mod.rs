@@ -318,14 +318,14 @@ impl Font {
     fn metrics(&self) -> Metrics {
         let average_advance = self.glyph_advance('0');
 
-        let ascent = self.ct_font.ascent() as f64;
-        let descent = self.ct_font.descent() as f64;
-        let leading = self.ct_font.leading() as f64;
-        let line_height = (ascent + descent + leading + 0.5).floor();
+        let ascent = self.ct_font.ascent().round() as f64;
+        let descent = self.ct_font.descent().round() as f64;
+        let leading = self.ct_font.leading().round() as f64;
+        let line_height = ascent + descent + leading;
 
         // Strikeout and underline metrics.
         // CoreText doesn't provide strikeout so we provide our own.
-        let underline_position = (self.ct_font.underline_position() - descent) as f32;
+        let underline_position = self.ct_font.underline_position() as f32;
         let underline_thickness = self.ct_font.underline_thickness() as f32;
         let strikeout_position = (line_height / 2. - descent) as f32;
         let strikeout_thickness = underline_thickness;
