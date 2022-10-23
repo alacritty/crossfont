@@ -58,7 +58,7 @@ struct FaceLoadingProperties {
     render_mode: freetype::RenderMode,
     lcd_filter: c_uint,
     non_scalable: Option<f32>,
-    colored: bool,
+    colored_bitmap: bool,
     embolden: bool,
     matrix: Option<Matrix>,
     pixelsize_fixup_factor: Option<f64>,
@@ -208,7 +208,7 @@ impl Rasterize for FreeTypeRasterizer {
             .non_scalable
             .unwrap_or_else(|| glyph_key.size.as_f32_pts() * self.device_pixel_ratio * 96. / 72.);
 
-        if !face.colored {
+        if !face.colored_bitmap {
             face.ft_face.set_char_size(to_freetype_26_6(pixelsize), 0, 0, 0)?;
         }
 
@@ -268,7 +268,7 @@ impl Rasterize for FreeTypeRasterizer {
             return Err(Error::MissingGlyph(rasterized_glyph));
         }
 
-        if face.colored {
+        if face.colored_bitmap {
             let fixup_factor = match face.pixelsize_fixup_factor {
                 Some(fixup_factor) => fixup_factor,
                 None => {
@@ -685,7 +685,7 @@ impl FreeTypeLoader {
 
     fn load_ft_face(&mut self, ft_face_location: FtFaceLocation) -> Result<Rc<FtFace>, Error> {
         let mut ft_face = self.library.new_face(&ft_face_location.path, ft_face_location.index)?;
-        if ft_face.has_color() {
+        if ft_face.has_color() && !ft_face.is_scalable() {
             unsafe {
                 // Select the colored bitmap size to use from the array of available sizes.
                 freetype_sys::FT_Select_Size(ft_face.raw_mut(), 0);
@@ -742,7 +742,7 @@ impl FreeTypeLoader {
                 render_mode: Self::ft_render_mode(pattern),
                 lcd_filter: Self::ft_lcd_filter(pattern),
                 non_scalable,
-                colored: ft_face.has_color(),
+                colored_bitmap: ft_face.has_color() && !ft_face.is_scalable(),
                 embolden,
                 matrix,
                 pixelsize_fixup_factor,
