@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Font size of scalable colored glyphs
+- macOS underline metrics being relative to descent and not baseline
 
 ## 0.5.0
 
