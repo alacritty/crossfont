@@ -14,14 +14,16 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v2
-      - name: Stable
+      - uses: actions/checkout@v3
+      - name: stable
         run: cargo test
-      - name: Oldstable
+      - name: msrv
+        shell: bash
         run: |
-          rustup default 1.56.0
+          msrv=$(cat Cargo.toml | grep "rust-version" | sed 's/.*"\(.*\)".*/\1/')
+          rustup default $msrv
           cargo test
-      - name: Clippy
+      - name: clippy
         run: |
           rustup component add clippy
           cargo clippy --all-targets
