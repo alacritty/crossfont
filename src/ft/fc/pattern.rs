@@ -218,7 +218,7 @@ impl<'a> DoublePropertyIter<'a> {
         };
 
         if result == FcResultMatch {
-            Some(value as f64)
+            Some(value)
         } else {
             None
         }
