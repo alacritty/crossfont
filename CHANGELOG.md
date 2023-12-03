@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `Size` now uses 6 floating point digits precision instead of rounding to 0.5.
 - Add `Size::from_px`, `Size::as_px`, `Size::as_pt`, `Size::change_px`, and `Size::scale`.
-- Remove `Rasterizer::update_dpr`; users should scale font themselves.
+- Remove `Rasterizer::update_dpr`; users should scale fonts themselves.
 
 ## 0.5.2
 
