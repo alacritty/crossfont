@@ -112,7 +112,7 @@ pub struct Size(u32);
 impl Size {
     /// Create a new `Size` from a f32 size in points.
     ///
-    /// The font size is automatically clamped to supported range of [1.; 4000.] pt.
+    /// The font size is automatically clamped to supported range of `[1.; 3999.]` pt.
     pub fn new(size: f32) -> Size {
         let size = size.clamp(1., MAX_FONT_PT_SIZE);
         Size((size * Self::factor()) as u32)
@@ -124,12 +124,6 @@ impl Size {
     pub fn from_px(size: u16) -> Self {
         let pt = size as f32 * 72. / 96.;
         Size::new(pt)
-    }
-
-    /// Change font size in px by the given amount.
-    pub fn change_px(self, delta: i32) -> Self {
-        let new_size = (self.as_px() as i32 + delta).clamp(1, u16::MAX as i32) as u16;
-        Size::from_px(new_size)
     }
 
     /// Scale font size by the given amount.
