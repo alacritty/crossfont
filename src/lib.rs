@@ -7,7 +7,6 @@
 #![deny(clippy::all, clippy::if_not_else, clippy::enum_glob_use)]
 
 use std::fmt::{self, Display, Formatter};
-use std::ops::{Add, Mul};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[cfg(not(any(target_os = "macos", windows)))]
@@ -24,6 +23,11 @@ pub use directwrite::DirectWriteRasterizer as Rasterizer;
 pub mod darwin;
 #[cfg(target_os = "macos")]
 pub use darwin::CoreTextRasterizer as Rasterizer;
+
+/// Max font size in pt.
+///
+/// The value is picked based on `u32` max, since we use 6 digits for fract.
+const MAX_FONT_PT_SIZE: f32 = 3999.;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FontDesc {
@@ -101,47 +105,52 @@ pub struct GlyphKey {
     pub size: Size,
 }
 
-/// Font size stored as integer.
+/// Font size stored as base and fraction.
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Size(i16);
+pub struct Size(u32);
 
 impl Size {
     /// Create a new `Size` from a f32 size in points.
+    ///
+    /// The font size is automatically clamped to supported range of [1.; 4000.] pt.
     pub fn new(size: f32) -> Size {
-        Size((size * Size::factor()) as i16)
+        let size = size.clamp(1., MAX_FONT_PT_SIZE);
+        Size((size * Self::factor()) as u32)
+    }
+
+    /// Create a new `Size` from px.
+    ///
+    /// The value will be clamped to the pt range of [`Size::new`].
+    pub fn from_px(size: u16) -> Self {
+        let pt = size as f32 * 72. / 96.;
+        Size::new(pt)
+    }
+
+    /// Change font size in px by the given amount.
+    pub fn change_px(self, delta: i32) -> Self {
+        let new_size = (self.as_px() as i32 + delta).clamp(1, u16::MAX as i32) as u16;
+        Size::from_px(new_size)
+    }
+
+    /// Scale font size by the given amount.
+    pub fn scale(self, scale: f32) -> Self {
+        Self::new(self.as_pt() * scale)
+    }
+
+    /// Get size in `px`.
+    pub fn as_px(self) -> u16 {
+        (self.as_pt() * 96. / 72.).trunc() as u16
+    }
+
+    /// Get the size in `pt`.
+    pub fn as_pt(self) -> f32 {
+        (f64::from(self.0) / Size::factor() as f64) as f32
     }
 
     /// Scale factor between font "Size" type and point size.
     #[inline]
-    pub fn factor() -> f32 {
-        2.0
-    }
-
-    /// Get the f32 size in points.
-    pub fn as_f32_pts(self) -> f32 {
-        f32::from(self.0) / Size::factor()
-    }
-}
-
-impl<T: Into<Size>> Add<T> for Size {
-    type Output = Size;
-
-    fn add(self, other: T) -> Size {
-        Size(self.0.saturating_add(other.into().0))
-    }
-}
-
-impl<T: Into<Size>> Mul<T> for Size {
-    type Output = Size;
-
-    fn mul(self, other: T) -> Size {
-        Size(self.0 * other.into().0)
-    }
-}
-
-impl From<f32> for Size {
-    fn from(float: f32) -> Size {
-        Size::new(float)
+    fn factor() -> f32 {
+        1_000_000.
     }
 }
 
@@ -231,7 +240,7 @@ impl Display for Error {
 
 pub trait Rasterize {
     /// Create a new Rasterizer.
-    fn new(device_pixel_ratio: f32) -> Result<Self, Error>
+    fn new() -> Result<Self, Error>
     where
         Self: Sized;
 
@@ -243,9 +252,6 @@ pub trait Rasterize {
 
     /// Rasterize the glyph described by `GlyphKey`..
     fn get_glyph(&mut self, _: GlyphKey) -> Result<RasterizedGlyph, Error>;
-
-    /// Update the Rasterizer's DPI factor.
-    fn update_dpr(&mut self, device_pixel_ratio: f32);
 
     /// Kerning between two characters.
     fn kerning(&mut self, left: GlyphKey, right: GlyphKey) -> (f32, f32);

@@ -102,12 +102,11 @@ impl Descriptor {
 pub struct CoreTextRasterizer {
     fonts: HashMap<FontKey, Font>,
     keys: HashMap<(FontDesc, Size), FontKey>,
-    device_pixel_ratio: f32,
 }
 
 impl crate::Rasterize for CoreTextRasterizer {
-    fn new(device_pixel_ratio: f32) -> Result<CoreTextRasterizer, Error> {
-        Ok(CoreTextRasterizer { fonts: HashMap::new(), keys: HashMap::new(), device_pixel_ratio })
+    fn new() -> Result<CoreTextRasterizer, Error> {
+        Ok(CoreTextRasterizer { fonts: HashMap::new(), keys: HashMap::new() })
     }
 
     /// Get metrics for font specified by FontKey.
@@ -118,7 +117,7 @@ impl crate::Rasterize for CoreTextRasterizer {
     }
 
     fn load_font(&mut self, desc: &FontDesc, size: Size) -> Result<FontKey, Error> {
-        let scaled_size = Size::new(size.as_f32_pts() * self.device_pixel_ratio);
+        let scaled_size = Size::new(size.as_pt());
         self.keys.get(&(desc.to_owned(), scaled_size)).map(|k| Ok(*k)).unwrap_or_else(|| {
             let font = self.get_font(desc, size)?;
             let key = FontKey::next();
@@ -156,10 +155,6 @@ impl crate::Rasterize for CoreTextRasterizer {
     fn kerning(&mut self, _left: GlyphKey, _right: GlyphKey) -> (f32, f32) {
         (0., 0.)
     }
-
-    fn update_dpr(&mut self, device_pixel_ratio: f32) {
-        self.device_pixel_ratio = device_pixel_ratio;
-    }
 }
 
 impl CoreTextRasterizer {
@@ -173,7 +168,7 @@ impl CoreTextRasterizer {
         for descriptor in descriptors {
             if descriptor.style_name == style {
                 // Found the font we want.
-                let scaled_size = f64::from(size.as_f32_pts()) * f64::from(self.device_pixel_ratio);
+                let scaled_size = f64::from(size.as_pt());
                 let font = descriptor.to_font(scaled_size, true);
                 return Ok(font);
             }
@@ -191,7 +186,7 @@ impl CoreTextRasterizer {
     ) -> Result<Font, Error> {
         let bold = weight == Weight::Bold;
         let italic = slant != Slant::Normal;
-        let scaled_size = f64::from(size.as_f32_pts()) * f64::from(self.device_pixel_ratio);
+        let scaled_size = f64::from(size.as_pt());
 
         let descriptors = descriptors_for_family(&desc.name[..]);
         for descriptor in descriptors {
