@@ -88,7 +88,6 @@ impl fmt::Debug for FaceLoadingProperties {
 pub struct FreeTypeRasterizer {
     loader: FreeTypeLoader,
     fallback_lists: HashMap<FontKey, FallbackList>,
-    device_pixel_ratio: f32,
 
     /// Rasterizer creation time stamp to delay lazy font config updates
     /// in `Rasterizer::load_font`.
@@ -133,11 +132,10 @@ impl IntoF32 for i64 {
 }
 
 impl Rasterize for FreeTypeRasterizer {
-    fn new(device_pixel_ratio: f32) -> Result<FreeTypeRasterizer, Error> {
+    fn new() -> Result<FreeTypeRasterizer, Error> {
         Ok(FreeTypeRasterizer {
             loader: FreeTypeLoader::new()?,
             fallback_lists: HashMap::new(),
-            device_pixel_ratio,
             creation_timestamp: Some(Instant::now()),
         })
     }
@@ -204,9 +202,7 @@ impl Rasterize for FreeTypeRasterizer {
         let font_key = self.face_for_glyph(glyph_key);
         let face = &self.loader.faces[&font_key];
         let index = face.ft_face.get_char_index(glyph_key.character as usize);
-        let pixelsize = face
-            .non_scalable
-            .unwrap_or_else(|| glyph_key.size.as_f32_pts() * self.device_pixel_ratio * 96. / 72.);
+        let pixelsize = face.non_scalable.unwrap_or_else(|| glyph_key.size.as_px() as f32);
 
         if !face.colored_bitmap {
             face.ft_face.set_char_size(to_freetype_26_6(pixelsize), 0, 0, 0)?;
@@ -308,10 +304,6 @@ impl Rasterize for FreeTypeRasterizer {
 
         (from_freetype_26_6(kerning.x), from_freetype_26_6(kerning.y))
     }
-
-    fn update_dpr(&mut self, device_pixel_ratio: f32) {
-        self.device_pixel_ratio = device_pixel_ratio;
-    }
 }
 
 impl From<Slant> for fc::Slant {
@@ -342,7 +334,7 @@ impl FreeTypeRasterizer {
     /// Load a font face according to `FontDesc`.
     fn get_face(&mut self, desc: &FontDesc, size: Size) -> Result<FontKey, Error> {
         // Adjust for DPR.
-        let size = f64::from(size.as_f32_pts() * self.device_pixel_ratio * 96. / 72.);
+        let size = f64::from(size.as_px());
 
         let config = fc::Config::get_current();
         let mut pattern = Pattern::new();

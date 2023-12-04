@@ -35,7 +35,6 @@ struct Font {
 pub struct DirectWriteRasterizer {
     fonts: HashMap<FontKey, Font>,
     keys: HashMap<FontDesc, FontKey>,
-    device_pixel_ratio: f32,
     available_fonts: FontCollection,
     fallback_sequence: Option<FontFallback>,
 }
@@ -48,7 +47,7 @@ impl DirectWriteRasterizer {
         character: char,
         glyph_index: u16,
     ) -> Result<RasterizedGlyph, Error> {
-        let em_size = em_size(size);
+        let em_size = f32::from(size.as_px());
 
         let glyph_run = DWRITE_GLYPH_RUN {
             fontFace: unsafe { face.as_ptr() },
@@ -63,13 +62,13 @@ impl DirectWriteRasterizer {
 
         let rendering_mode = face.get_recommended_rendering_mode_default_params(
             em_size,
-            self.device_pixel_ratio,
+            1.,
             dwrote::DWRITE_MEASURING_MODE_NATURAL,
         );
 
         let glyph_analysis = GlyphRunAnalysis::create(
             &glyph_run,
-            self.device_pixel_ratio,
+            1.,
             None,
             rendering_mode,
             dwrote::DWRITE_MEASURING_MODE_NATURAL,
@@ -136,11 +135,10 @@ impl DirectWriteRasterizer {
 }
 
 impl crate::Rasterize for DirectWriteRasterizer {
-    fn new(device_pixel_ratio: f32) -> Result<DirectWriteRasterizer, Error> {
+    fn new() -> Result<DirectWriteRasterizer, Error> {
         Ok(DirectWriteRasterizer {
             fonts: HashMap::new(),
             keys: HashMap::new(),
-            device_pixel_ratio,
             available_fonts: FontCollection::system(),
             fallback_sequence: FontFallback::get_system_fallback(),
         })
@@ -150,7 +148,7 @@ impl crate::Rasterize for DirectWriteRasterizer {
         let face = &self.get_loaded_font(key)?.face;
         let vmetrics = face.metrics().metrics0();
 
-        let scale = em_size(size) * self.device_pixel_ratio / f32::from(vmetrics.designUnitsPerEm);
+        let scale = f32::from(size.as_px()) / f32::from(vmetrics.designUnitsPerEm);
 
         let underline_position = f32::from(vmetrics.underlinePosition) * scale;
         let underline_thickness = f32::from(vmetrics.underlineThickness) * scale;
@@ -252,17 +250,9 @@ impl crate::Rasterize for DirectWriteRasterizer {
         }
     }
 
-    fn kerning(&mut self, left: GlyphKey, right: GlyphKey) -> (f32, f32) {
+    fn kerning(&mut self, _left: GlyphKey, _right: GlyphKey) -> (f32, f32) {
         (0., 0.)
     }
-
-    fn update_dpr(&mut self, device_pixel_ratio: f32) {
-        self.device_pixel_ratio = device_pixel_ratio;
-    }
-}
-
-fn em_size(size: Size) -> f32 {
-    size.as_f32_pts() * (96.0 / 72.0)
 }
 
 impl From<dwrote::Font> for Font {
