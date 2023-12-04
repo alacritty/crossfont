@@ -334,7 +334,7 @@ impl FreeTypeRasterizer {
     /// Load a font face according to `FontDesc`.
     fn get_face(&mut self, desc: &FontDesc, size: Size) -> Result<FontKey, Error> {
         // Adjust for DPR.
-        let size = f64::from(size.as_pt() * 96. / 72.);
+        let size = f64::from(size.as_px());
 
         let config = fc::Config::get_current();
         let mut pattern = Pattern::new();
