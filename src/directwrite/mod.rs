@@ -47,7 +47,7 @@ impl DirectWriteRasterizer {
         character: char,
         glyph_index: u16,
     ) -> Result<RasterizedGlyph, Error> {
-        let em_size = f32::from(size.as_px());
+        let em_size = size.as_px();
 
         let glyph_run = DWRITE_GLYPH_RUN {
             fontFace: unsafe { face.as_ptr() },
@@ -148,7 +148,7 @@ impl crate::Rasterize for DirectWriteRasterizer {
         let face = &self.get_loaded_font(key)?.face;
         let vmetrics = face.metrics().metrics0();
 
-        let scale = f32::from(size.as_px()) / f32::from(vmetrics.designUnitsPerEm);
+        let scale = size.as_px() / f32::from(vmetrics.designUnitsPerEm);
 
         let underline_position = f32::from(vmetrics.underlinePosition) * scale;
         let underline_thickness = f32::from(vmetrics.underlineThickness) * scale;

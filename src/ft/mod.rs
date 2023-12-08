@@ -202,7 +202,7 @@ impl Rasterize for FreeTypeRasterizer {
         let font_key = self.face_for_glyph(glyph_key);
         let face = &self.loader.faces[&font_key];
         let index = face.ft_face.get_char_index(glyph_key.character as usize);
-        let pixelsize = face.non_scalable.unwrap_or_else(|| glyph_key.size.as_px() as f32);
+        let pixelsize = face.non_scalable.unwrap_or_else(|| glyph_key.size.as_px());
 
         if !face.colored_bitmap {
             face.ft_face.set_char_size(to_freetype_26_6(pixelsize), 0, 0, 0)?;

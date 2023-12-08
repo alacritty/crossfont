@@ -6,9 +6,15 @@ The sections should follow the order `Added`, `Changed`, `Fixed`, and `Removed`.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- `Size::as_px` now returns `f32`.
+
 ## 0.6.0
 
-## Changed
+### Changed
 
 - `Size` now uses 6 floating point digits precision instead of rounding to 0.5.
 - Add `Size::from_px`, `Size::as_px`, `Size::as_pt`, and `Size::scale`.
