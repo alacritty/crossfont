@@ -132,8 +132,8 @@ impl Size {
     }
 
     /// Get size in `px`.
-    pub fn as_px(self) -> u16 {
-        (self.as_pt() * 96. / 72.).trunc() as u16
+    pub fn as_px(self) -> f32 {
+        self.as_pt() * 96. / 72.
     }
 
     /// Get the size in `pt`.
