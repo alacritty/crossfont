@@ -121,8 +121,8 @@ impl Size {
     /// Create a new `Size` from px.
     ///
     /// The value will be clamped to the pt range of [`Size::new`].
-    pub fn from_px(size: u16) -> Self {
-        let pt = size as f32 * 72. / 96.;
+    pub fn from_px(size: f32) -> Self {
+        let pt = size * 72. / 96.;
         Size::new(pt)
     }
 

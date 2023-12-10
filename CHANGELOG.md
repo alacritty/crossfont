@@ -10,15 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `Size::as_px` now returns `f32`.
+- `Size::as_px` and `Size::from_px` now use `f32` type
 
 ## 0.6.0
 
 ### Changed
 
-- `Size` now uses 6 floating point digits precision instead of rounding to 0.5.
-- Add `Size::from_px`, `Size::as_px`, `Size::as_pt`, and `Size::scale`.
-- Remove `Rasterizer::update_dpr`; users should scale fonts themselves.
+- `Size` now uses 6 floating point digits precision instead of rounding to 0.5
+- Add `Size::from_px`, `Size::as_px`, `Size::as_pt`, and `Size::scale`
+- Remove `Rasterizer::update_dpr`; users should scale fonts themselves
 
 ## 0.5.2
 
