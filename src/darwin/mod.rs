@@ -1,13 +1,14 @@
 //! Font rendering based on CoreText.
 
 use std::collections::HashMap;
+use std::ffi::c_char;
 use std::ffi::CStr;
 use std::iter;
 use std::path::PathBuf;
 use std::ptr;
 
 use cocoa::base::{id, nil};
-use cocoa::foundation::{NSString, NSUserDefaults};
+use cocoa::foundation::{NSInteger, NSString, NSUserDefaults};
 
 use core_foundation::array::{CFArray, CFIndex};
 use core_foundation::base::{CFType, ItemRef, TCFType};
@@ -60,7 +61,7 @@ impl Descriptor {
     fn new(desc: CTFontDescriptor) -> Descriptor {
         Descriptor {
             style_name: desc.style_name(),
-            font_path: desc.font_path().unwrap_or_else(PathBuf::new),
+            font_path: desc.font_path().unwrap_or_default(),
             ct_descriptor: desc,
         }
     }
@@ -277,26 +278,30 @@ static FONT_SMOOTHING_ENABLED: Lazy<bool> = Lazy::new(|| {
         let key = NSString::alloc(nil).init_str("AppleFontSmoothing");
         let value: id = msg_send![id::standardUserDefaults(), objectForKey: key];
 
-        if !msg_send![value, isKindOfClass: class!(NSNumber)] {
-            return true;
-        }
+        if msg_send![value, isKindOfClass: class!(NSNumber)] {
+            let num_type: *const c_char = msg_send![value, objCType];
+            if num_type.is_null() {
+                return true;
+            }
 
-        let num_type: id = msg_send![value, objCType];
-        if num_type == nil {
-            return true;
-        }
+            // NSNumber's objCType method returns one of these strings depending on the size:
+            // q = quad (long long), l = long, i = int, s = short.
+            // This is done to reject booleans, which are NSNumbers with an objCType of "c", but
+            // macOS does not treat them the same as an integer 0 or 1 for this setting,
+            // it just ignores it.
+            let int_specifiers: [&[u8]; 4] = [b"q", b"l", b"i", b"s"];
+            if !int_specifiers.contains(&CStr::from_ptr(num_type).to_bytes()) {
+                return true;
+            }
 
-        // NSNumber's objCType method returns one of these strings depending on the size:
-        // q = quad (long long), l = long, i = int, s = short.
-        // This is done to reject booleans, which are NSNumbers with an objCType of "c", but macOS
-        // does not treat them the same as an integer 0 or 1 for this setting, it just ignores it.
-        let int_specifiers: [&[u8]; 4] = [b"q", b"l", b"i", b"s"];
-        if !int_specifiers.contains(&CStr::from_ptr(num_type as *const i8).to_bytes()) {
-            return true;
+            let smoothing: NSInteger = msg_send![value, integerValue];
+            smoothing != 0
+        } else if msg_send![value, isKindOfClass: class!(NSString)] {
+            let smoothing: NSInteger = msg_send![value, integerValue];
+            smoothing != 0
+        } else {
+            true
         }
-
-        let smoothing: id = msg_send![value, integerValue];
-        smoothing as i64 != 0
     })
 });
 
@@ -313,9 +318,9 @@ impl Font {
     fn metrics(&self) -> Metrics {
         let average_advance = self.glyph_advance('0');
 
-        let ascent = self.ct_font.ascent().round() as f64;
-        let descent = self.ct_font.descent().round() as f64;
-        let leading = self.ct_font.leading().round() as f64;
+        let ascent = self.ct_font.ascent().round();
+        let descent = self.ct_font.descent().round();
+        let leading = self.ct_font.leading().round();
         let line_height = ascent + descent + leading;
 
         // Strikeout and underline metrics.

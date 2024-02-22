@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking** fontconfig system library provider changed to yeslogic-fontcontconfig-sys
 - **Breaking** freetype-rs bumped to 0.36.0
 
+### Fixed
+
+- On macOS, `AppleFontSmoothing` not recognized when specified as string
+
 ## 0.7.0
 
 ### Changed
