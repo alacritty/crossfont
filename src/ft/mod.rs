@@ -78,6 +78,7 @@ impl fmt::Debug for FaceLoadingProperties {
                 freetype::RenderMode::Lcd => "Lcd",
                 freetype::RenderMode::LcdV => "LcdV",
                 freetype::RenderMode::Max => "Max",
+                freetype::RenderMode::Sdf => "Sdf",
             })
             .field("lcd_filter", &self.lcd_filter)
             .finish()
@@ -201,7 +202,7 @@ impl Rasterize for FreeTypeRasterizer {
     fn get_glyph(&mut self, glyph_key: GlyphKey) -> Result<RasterizedGlyph, Error> {
         let font_key = self.face_for_glyph(glyph_key);
         let face = &self.loader.faces[&font_key];
-        let index = face.ft_face.get_char_index(glyph_key.character as usize);
+        let index = face.ft_face.get_char_index(glyph_key.character as usize).unwrap_or_default();
         let pixelsize = face.non_scalable.unwrap_or_else(|| glyph_key.size.as_px());
 
         if !face.colored_bitmap {
@@ -292,8 +293,8 @@ impl Rasterize for FreeTypeRasterizer {
             return (0., 0.);
         }
 
-        let left = ft_face.get_char_index(left.character as usize);
-        let right = ft_face.get_char_index(right.character as usize);
+        let left = ft_face.get_char_index(left.character as usize).unwrap_or_default();
+        let right = ft_face.get_char_index(right.character as usize).unwrap_or_default();
 
         let mut kerning = freetype_sys::FT_Vector::default();
         let mode = freetype_sys::FT_KERNING_DEFAULT;
@@ -423,9 +424,7 @@ impl FreeTypeRasterizer {
 
     fn face_for_glyph(&mut self, glyph_key: GlyphKey) -> FontKey {
         if let Some(face) = self.loader.faces.get(&glyph_key.font_key) {
-            let index = face.ft_face.get_char_index(glyph_key.character as usize);
-
-            if index != 0 {
+            if face.ft_face.get_char_index(glyph_key.character as usize).is_some() {
                 return glyph_key.font_key;
             }
         }
@@ -446,10 +445,8 @@ impl FreeTypeRasterizer {
             let font_pattern = &fallback_font.pattern;
             match self.loader.faces.get(&font_key) {
                 Some(face) => {
-                    let index = face.ft_face.get_char_index(glyph.character as usize);
-
                     // We found something in a current face, so let's use it.
-                    if index != 0 {
+                    if face.ft_face.get_char_index(glyph.character as usize).is_some() {
                         return Ok(font_key);
                     }
                 },
