@@ -693,7 +693,7 @@ impl FreeTypeLoader {
         font_key: FontKey,
     ) -> Result<Option<FontKey>, Error> {
         if let Some(ft_face_location) = pattern.ft_face_location(0) {
-            if self.faces.get(&font_key).is_some() {
+            if self.faces.contains_key(&font_key) {
                 return Ok(Some(font_key));
             }
 
