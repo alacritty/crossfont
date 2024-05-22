@@ -85,8 +85,8 @@ impl DirectWriteRasterizer {
 
         Ok(RasterizedGlyph {
             character,
-            width: (bounds.right - bounds.left) as i32,
-            height: (bounds.bottom - bounds.top) as i32,
+            width: bounds.right - bounds.left,
+            height: bounds.bottom - bounds.top,
             top: -bounds.top,
             left: bounds.left,
             advance: (0, 0),
