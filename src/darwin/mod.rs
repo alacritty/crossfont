@@ -274,8 +274,10 @@ static FONT_SMOOTHING_ENABLED: Lazy<bool> = Lazy::new(|| {
         let value = unsafe {
             NSUserDefaults::standardUserDefaults().objectForKey(ns_string!("AppleFontSmoothing"))
         };
-        let Some(value) = value else {
-            return true;
+
+        let value = match value {
+            Some(value) => value,
+            None => return true,
         };
 
         // SAFETY: The values in `NSUserDefaults` are always subclasses of
