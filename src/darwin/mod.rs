@@ -1,14 +1,10 @@
 //! Font rendering based on CoreText.
 
 use std::collections::HashMap;
-use std::ffi::c_char;
 use std::ffi::CStr;
 use std::iter;
 use std::path::PathBuf;
 use std::ptr;
-
-use cocoa::base::{id, nil};
-use cocoa::foundation::{NSInteger, NSString, NSUserDefaults};
 
 use core_foundation::array::{CFArray, CFIndex};
 use core_foundation::base::{CFType, ItemRef, TCFType};
@@ -28,10 +24,10 @@ use core_text::font_descriptor::{
     self, kCTFontColorGlyphsTrait, kCTFontDefaultOrientation, kCTFontEnabledAttribute,
     CTFontDescriptor, SymbolicTraitAccessors,
 };
+use objc2::rc::{autoreleasepool, Retained};
+use objc2_foundation::{ns_string, NSNumber, NSObject, NSObjectProtocol, NSString, NSUserDefaults};
 
 use log::{trace, warn};
-use objc::rc::autoreleasepool;
-use objc::{class, msg_send, sel, sel_impl};
 use once_cell::sync::Lazy;
 
 pub mod byte_order;
@@ -274,15 +270,23 @@ fn descriptors_for_family(family: &str) -> Vec<Descriptor> {
 // other integer, or a missing value (the default), or a value of any other type, as leaving it
 // enabled.
 static FONT_SMOOTHING_ENABLED: Lazy<bool> = Lazy::new(|| {
-    autoreleasepool(|| unsafe {
-        let key = NSString::alloc(nil).init_str("AppleFontSmoothing");
-        let value: id = msg_send![id::standardUserDefaults(), objectForKey: key];
+    autoreleasepool(|_| {
+        let value = unsafe {
+            NSUserDefaults::standardUserDefaults().objectForKey(ns_string!("AppleFontSmoothing"))
+        };
 
-        if msg_send![value, isKindOfClass: class!(NSNumber)] {
-            let num_type: *const c_char = msg_send![value, objCType];
-            if num_type.is_null() {
-                return true;
-            }
+        let value = match value {
+            Some(value) => value,
+            None => return true,
+        };
+
+        // SAFETY: The values in `NSUserDefaults` are always subclasses of
+        // `NSObject`.
+        let value: Retained<NSObject> = unsafe { Retained::cast(value) };
+
+        if value.is_kind_of::<NSNumber>() {
+            // SAFETY: Just checked that the value is a NSNumber
+            let value: Retained<NSNumber> = unsafe { Retained::cast(value) };
 
             // NSNumber's objCType method returns one of these strings depending on the size:
             // q = quad (long long), l = long, i = int, s = short.
@@ -290,14 +294,18 @@ static FONT_SMOOTHING_ENABLED: Lazy<bool> = Lazy::new(|| {
             // macOS does not treat them the same as an integer 0 or 1 for this setting,
             // it just ignores it.
             let int_specifiers: [&[u8]; 4] = [b"q", b"l", b"i", b"s"];
-            if !int_specifiers.contains(&CStr::from_ptr(num_type).to_bytes()) {
+
+            let encoding = unsafe { CStr::from_ptr(value.objCType().as_ptr()).to_bytes() };
+            if !int_specifiers.contains(&encoding) {
                 return true;
             }
 
-            let smoothing: NSInteger = msg_send![value, integerValue];
+            let smoothing = value.integerValue();
             smoothing != 0
-        } else if msg_send![value, isKindOfClass: class!(NSString)] {
-            let smoothing: NSInteger = msg_send![value, integerValue];
+        } else if value.is_kind_of::<NSString>() {
+            // SAFETY: Just checked that the value is a NSString
+            let value: Retained<NSString> = unsafe { Retained::cast(value) };
+            let smoothing = unsafe { value.integerValue() };
             smoothing != 0
         } else {
             true

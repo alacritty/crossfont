@@ -38,7 +38,7 @@ impl CharSetRef {
     }
 
     pub fn count(&self) -> u32 {
-        unsafe { FcCharSetCount(self.as_ptr()) as u32 }
+        unsafe { FcCharSetCount(self.as_ptr()) }
     }
 
     pub fn union(&self, other: &CharSetRef) -> CharSet {

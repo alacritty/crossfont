@@ -1,6 +1,5 @@
 use std::ffi::{CStr, CString};
 use std::fmt;
-use std::mem;
 use std::path::PathBuf;
 use std::ptr::{self, NonNull};
 use std::str;
@@ -45,11 +44,7 @@ impl<'a> StringPropertyIter<'a> {
         };
 
         if result == FcResultMatch {
-            // Transmute here is to extend lifetime of the str to that of the iterator.
-            //
-            // Potential unsafety? What happens if the pattern is modified while this ptr is
-            // borrowed out?
-            unsafe { mem::transmute(CStr::from_ptr(value as *const c_char).to_str().ok()?) }
+            unsafe { CStr::from_ptr(value as *const c_char).to_str().ok() }
         } else {
             None
         }

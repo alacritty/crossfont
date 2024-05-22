@@ -10,7 +10,7 @@ readme = "README.md"
 categories = ["gui", "os"]
 keywords = ["font"]
 edition = "2021"
-rust-version = "1.65.0"
+rust-version = "1.71.0"
 
 [dependencies]
 libc = "0.2"
@@ -25,13 +25,17 @@ freetype-rs = "0.36.0"
 pkg-config = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-cocoa = "0.25.0"
 core-foundation = "0.9.3"
 core-text = "20.1.0"
 core-graphics = "0.23.1"
 core-foundation-sys = "0.8.4"
-objc = "0.2.7"
 once_cell = "1.12"
+objc2 = "0.5.1"
+objc2-foundation = { version = "0.2.2", features = [
+    "NSString",
+    "NSUserDefaults",
+    "NSValue",
+] }
 
 [target.'cfg(windows)'.dependencies]
 dwrote = { version = "0.11" }
