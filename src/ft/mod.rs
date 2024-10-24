@@ -663,11 +663,8 @@ impl FreeTypeLoader {
     fn new() -> Result<FreeTypeLoader, Error> {
         let library = Library::init()?;
 
-        #[cfg(ft_set_default_properties_available)]
-        unsafe {
-            // Initialize default properties, like user preferred interpreter.
-            freetype_sys::FT_Set_Default_Properties(library.raw());
-        };
+        // Initialize default properties, like user preferred interpreter.
+        unsafe { freetype_sys::FT_Set_Default_Properties(library.raw()) };
 
         Ok(FreeTypeLoader { library, faces: HashMap::new(), ft_faces: HashMap::new() })
     }
@@ -675,10 +672,8 @@ impl FreeTypeLoader {
     fn load_ft_face(&mut self, ft_face_location: FtFaceLocation) -> Result<Rc<FtFace>, Error> {
         let mut ft_face = self.library.new_face(&ft_face_location.path, ft_face_location.index)?;
         if ft_face.has_color() && !ft_face.is_scalable() {
-            unsafe {
-                // Select the colored bitmap size to use from the array of available sizes.
-                freetype_sys::FT_Select_Size(ft_face.raw_mut(), 0);
-            }
+            // Select the colored bitmap size to use from the array of available sizes.
+            unsafe { freetype_sys::FT_Select_Size(ft_face.raw_mut(), 0) };
         }
 
         let ft_face = Rc::new(ft_face);

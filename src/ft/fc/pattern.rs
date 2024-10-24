@@ -1,6 +1,5 @@
 use std::ffi::{CStr, CString};
 use std::fmt;
-use std::mem;
 use std::path::PathBuf;
 use std::ptr::{self, NonNull};
 use std::str;
@@ -45,11 +44,7 @@ impl<'a> StringPropertyIter<'a> {
         };
 
         if result == FcResultMatch {
-            // Transmute here is to extend lifetime of the str to that of the iterator.
-            //
-            // Potential unsafety? What happens if the pattern is modified while this ptr is
-            // borrowed out?
-            unsafe { mem::transmute(CStr::from_ptr(value as *const c_char).to_str().ok()?) }
+            unsafe { CStr::from_ptr(value as *const c_char).to_str().ok() }
         } else {
             None
         }
@@ -63,7 +58,7 @@ pub struct BooleanPropertyIter<'a> {
     index: usize,
 }
 
-impl<'a> BooleanPropertyIter<'a> {
+impl BooleanPropertyIter<'_> {
     fn new<'b>(pattern: &'b PatternRef, object: &'b [u8]) -> BooleanPropertyIter<'b> {
         BooleanPropertyIter { pattern, object, index: 0 }
     }
@@ -95,7 +90,7 @@ pub struct IntPropertyIter<'a> {
     index: usize,
 }
 
-impl<'a> IntPropertyIter<'a> {
+impl IntPropertyIter<'_> {
     fn new<'b>(pattern: &'b PatternRef, object: &'b [u8]) -> IntPropertyIter<'b> {
         IntPropertyIter { pattern, object, index: 0 }
     }
@@ -200,7 +195,7 @@ pub struct DoublePropertyIter<'a> {
     index: usize,
 }
 
-impl<'a> DoublePropertyIter<'a> {
+impl DoublePropertyIter<'_> {
     fn new<'b>(pattern: &'b PatternRef, object: &'b [u8]) -> DoublePropertyIter<'b> {
         DoublePropertyIter { pattern, object, index: 0 }
     }
@@ -552,13 +547,7 @@ impl PatternRef {
     /// retained. That is, the CharSet can be safely dropped immediately
     /// after being added to the pattern.
     pub fn add_charset(&self, charset: &CharSetRef) -> bool {
-        unsafe {
-            FcPatternAddCharSet(
-                self.as_ptr(),
-                b"charset\0".as_ptr() as *mut c_char,
-                charset.as_ptr(),
-            ) == 1
-        }
+        unsafe { FcPatternAddCharSet(self.as_ptr(), c"charset".as_ptr(), charset.as_ptr()) == 1 }
     }
 
     /// Get charset from the pattern.
@@ -566,12 +555,7 @@ impl PatternRef {
         unsafe {
             let mut charset = ptr::null_mut();
 
-            let result = FcPatternGetCharSet(
-                self.as_ptr(),
-                b"charset\0".as_ptr() as *mut c_char,
-                0,
-                &mut charset,
-            );
+            let result = FcPatternGetCharSet(self.as_ptr(), c"charset".as_ptr(), 0, &mut charset);
 
             if result == FcResultMatch {
                 Some(&*(charset as *const CharSetRef))
@@ -585,12 +569,7 @@ impl PatternRef {
     pub fn get_matrix(&self) -> Option<FcMatrix> {
         unsafe {
             let mut matrix = ptr::null_mut();
-            let result = FcPatternGetMatrix(
-                self.as_ptr(),
-                b"matrix\0".as_ptr() as *mut c_char,
-                0,
-                &mut matrix,
-            );
+            let result = FcPatternGetMatrix(self.as_ptr(), c"matrix".as_ptr(), 0, &mut matrix);
 
             if result == FcResultMatch {
                 Some(*matrix)
