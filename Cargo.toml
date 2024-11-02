@@ -19,7 +19,7 @@ log = "0.4"
 
 [target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
 yeslogic-fontconfig-sys = "6.0.0"
-freetype-rs = "0.37.0"
+freetype-rs = "0.36.0"
 
 [target.'cfg(not(any(target_os = "macos", windows)))'.build-dependencies]
 pkg-config = "0.3"

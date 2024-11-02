@@ -12,7 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - MSRV changed to 1.77.0
 - **Breaking** yeslogic-fontconfig-sys bumped to 6.0.0
-- **Breaking** freetype-rs bumped to 0.37.0
 
 ## 0.8.0
 
