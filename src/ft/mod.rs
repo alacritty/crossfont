@@ -201,6 +201,7 @@ impl Rasterize for FreeTypeRasterizer {
 
     fn get_glyph(&mut self, glyph_key: GlyphKey) -> Result<RasterizedGlyph, Error> {
         let font_key = self.face_for_glyph(glyph_key);
+        let secondary = !self.fallback_lists.contains_key(&font_key);
         let face = &self.loader.faces[&font_key];
         let index = face.ft_face.get_char_index(glyph_key.character as usize).unwrap_or_default();
         let pixelsize = face.non_scalable.unwrap_or_else(|| glyph_key.size.as_px());
@@ -259,6 +260,7 @@ impl Rasterize for FreeTypeRasterizer {
             height: pixel_height,
             advance,
             buffer,
+            secondary,
         };
 
         if index == MISSING_GLYPH_INDEX {

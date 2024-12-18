@@ -157,6 +157,7 @@ pub struct RasterizedGlyph {
     pub left: i32,
     pub advance: (i32, i32),
     pub buffer: BitmapBuffer,
+    pub secondary: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -178,6 +179,7 @@ impl Default for RasterizedGlyph {
             left: 0,
             advance: (0, 0),
             buffer: BitmapBuffer::Rgb(Vec::new()),
+            secondary: false,
         }
     }
 }

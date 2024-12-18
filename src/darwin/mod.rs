@@ -396,6 +396,7 @@ impl Font {
                 top: 0,
                 left: 0,
                 advance: (0, 0),
+                secondary: false,
                 buffer: BitmapBuffer::Rgb(Vec::new()),
             };
         }
@@ -458,6 +459,7 @@ impl Font {
             width: rasterized_width as i32,
             height: rasterized_height as i32,
             advance: (0, 0),
+            secondary: false,
             buffer,
         }
     }
