@@ -451,8 +451,7 @@ impl FreeTypeRasterizer {
                     }
                 },
                 None => {
-                    if !font_pattern.get_charset().map_or(false, |cs| cs.has_char(glyph.character))
-                    {
+                    if !font_pattern.get_charset().is_some_and(|cs| cs.has_char(glyph.character)) {
                         continue;
                     }
 

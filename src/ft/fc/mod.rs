@@ -35,8 +35,6 @@ pub use pattern::{FtFaceLocation, Pattern, PatternHash, PatternRef};
 /// The returned pattern is the result of Pattern::render_prepare.
 pub fn font_match(config: &ConfigRef, pattern: &PatternRef) -> Option<Pattern> {
     unsafe {
-        // What is this result actually used for? Seems redundant with
-        // return type.
         let mut result = FcResultNoMatch;
         let ptr = FcFontMatch(config.as_ptr(), pattern.as_ptr(), &mut result);
 
@@ -57,25 +55,21 @@ pub fn update_config() {
 
 /// List fonts by closeness to the pattern.
 pub fn font_sort(config: &ConfigRef, pattern: &PatternRef) -> Option<FontSet> {
-    unsafe {
-        // What is this result actually used for? Seems redundant with
-        // return type.
+    let ptr = unsafe {
         let mut result = FcResultNoMatch;
-
-        let mut charsets: *mut _ = ptr::null_mut();
-        let ptr = FcFontSort(
+        FcFontSort(
             config.as_ptr(),
             pattern.as_ptr(),
             1, // Trim font list.
-            &mut charsets,
+            ptr::null_mut(),
             &mut result,
-        );
+        )
+    };
 
-        if ptr.is_null() {
-            None
-        } else {
-            Some(FontSet::from_ptr(ptr))
-        }
+    if ptr.is_null() {
+        None
+    } else {
+        Some(unsafe { FontSet::from_ptr(ptr) })
     }
 }
 
