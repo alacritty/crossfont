@@ -1,37 +1,32 @@
 //! Font rendering based on CoreText.
 
 use std::collections::HashMap;
-use std::ffi::CStr;
+use std::ffi::{c_void, CStr};
 use std::iter;
 use std::path::PathBuf;
-use std::ptr;
+use std::ptr::{self, NonNull};
+use std::slice;
 
-use core_foundation::array::{CFArray, CFIndex};
-use core_foundation::base::{CFType, ItemRef, TCFType};
-use core_foundation::number::{CFNumber, CFNumberRef};
-use core_foundation::string::CFString;
-use core_graphics::base::kCGImageAlphaPremultipliedFirst;
-use core_graphics::color_space::CGColorSpace;
-use core_graphics::context::CGContext;
-use core_graphics::font::CGGlyph;
-use core_graphics::geometry::{CGPoint, CGRect, CGSize};
-use core_text::font::{
-    cascade_list_for_languages as ct_cascade_list_for_languages,
-    new_from_descriptor as ct_new_from_descriptor, new_from_name, CTFont,
-};
-use core_text::font_collection::create_for_family;
-use core_text::font_descriptor::{
-    self, kCTFontColorGlyphsTrait, kCTFontDefaultOrientation, kCTFontEnabledAttribute,
-    CTFontDescriptor, SymbolicTraitAccessors,
-};
 use objc2::rc::autoreleasepool;
+use objc2_core_foundation::{
+    kCFTypeSetCallBacks, CFArray, CFDictionary, CFIndex, CFNumber, CFRetained, CFSet, CFString,
+    CGFloat, CGPoint, CGRect, CGSize, Type, CFURL,
+};
+use objc2_core_graphics::{
+    CGBitmapContextCreate, CGBitmapContextGetBytesPerRow, CGBitmapContextGetData,
+    CGBitmapContextGetHeight, CGBitmapInfo, CGColorSpace, CGContext, CGGlyph, CGImageAlphaInfo,
+};
+use objc2_core_text::{
+    kCTFontCollectionRemoveDuplicatesOption, kCTFontEnabledAttribute, kCTFontFamilyNameAttribute,
+    kCTFontStyleNameAttribute, kCTFontURLAttribute, CTFont, CTFontCollection, CTFontDescriptor,
+    CTFontOrientation, CTFontSymbolicTraits,
+};
 use objc2_foundation::{ns_string, NSNumber, NSUserDefaults};
 
 use log::{trace, warn};
 use once_cell::sync::Lazy;
 
 pub mod byte_order;
-use byte_order::kCGBitmapByteOrder32Host;
 
 use super::{
     BitmapBuffer, Error, FontDesc, FontKey, GlyphKey, Metrics, RasterizedGlyph, Size, Slant, Style,
@@ -50,21 +45,27 @@ struct Descriptor {
     style_name: String,
     font_path: PathBuf,
 
-    ct_descriptor: CTFontDescriptor,
+    ct_descriptor: CFRetained<CTFontDescriptor>,
 }
 
 impl Descriptor {
-    fn new(desc: CTFontDescriptor) -> Descriptor {
-        Descriptor {
-            style_name: desc.style_name(),
-            font_path: desc.font_path().unwrap_or_default(),
-            ct_descriptor: desc,
-        }
+    fn new(desc: &CTFontDescriptor) -> Descriptor {
+        let style_name = unsafe { desc.attribute(kCTFontStyleNameAttribute) }
+            .expect("a font must have a non-null style name")
+            .downcast::<CFString>()
+            .unwrap();
+        let font_path = unsafe { desc.attribute(kCTFontURLAttribute) }
+            .and_then(|attr| attr.downcast::<CFURL>().ok())
+            .map(|url| url.to_file_path().unwrap())
+            .unwrap_or_default();
+        Descriptor { style_name: style_name.to_string(), font_path, ct_descriptor: desc.retain() }
     }
 
     /// Create a Font from this descriptor.
     fn to_font(&self, size: f64, load_fallbacks: bool) -> Font {
-        let ct_font = ct_new_from_descriptor(&self.ct_descriptor, size);
+        let ct_font = unsafe {
+            CTFont::with_font_descriptor(&self.ct_descriptor, size as CGFloat, ptr::null())
+        };
 
         let fallbacks = if load_fallbacks {
             // TODO fixme, hardcoded en for english.
@@ -80,9 +81,9 @@ impl Descriptor {
             // many chars. We add the symbols back in.
             // Investigate if we can actually use the .-prefixed
             // fallbacks somehow.
-            if let Ok(apple_symbols) = new_from_name("Apple Symbols", size) {
-                fallbacks.push(Font { ct_font: apple_symbols, fallbacks: Vec::new() })
-            };
+            let name = CFString::from_static_str("Apple Symbols");
+            let apple_symbols = unsafe { CTFont::with_name(&name, size, ptr::null_mut()) };
+            fallbacks.push(Font { ct_font: apple_symbols, fallbacks: Vec::new() });
 
             fallbacks
         } else {
@@ -210,34 +211,31 @@ impl CoreTextRasterizer {
 /// Return fallback descriptors for font/language list.
 fn cascade_list_for_languages(ct_font: &CTFont, languages: &[String]) -> Vec<Descriptor> {
     // Convert language type &Vec<String> -> CFArray.
-    let langarr: CFArray<CFString> = {
-        let tmp: Vec<CFString> = languages.iter().map(|language| CFString::new(language)).collect();
-        CFArray::from_CFTypes(&tmp)
+    let langarr = {
+        let tmp: Vec<_> = languages.iter().map(|language| CFString::from_str(language)).collect();
+        CFArray::from_retained_objects(&tmp)
     };
 
-    // CFArray of CTFontDescriptorRef (again).
-    let list = ct_cascade_list_for_languages(ct_font, &langarr);
+    let list =
+        unsafe { ct_font.default_cascade_list_for_languages(Some(langarr.as_opaque())) }.unwrap();
+    // CFArray of CTFontDescriptorRef.
+    let list = unsafe { CFRetained::cast_unchecked::<CFArray<CTFontDescriptor>>(list) };
 
     // Convert CFArray to Vec<Descriptor>.
-    list.into_iter().filter(is_enabled).map(|fontdesc| Descriptor::new(fontdesc.clone())).collect()
+    list.iter().filter(|desc| is_enabled(desc)).map(|desc| Descriptor::new(&desc)).collect()
 }
 
 /// Check if a font is enabled.
-fn is_enabled(fontdesc: &ItemRef<'_, CTFontDescriptor>) -> bool {
-    unsafe {
-        let descriptor = fontdesc.as_concrete_TypeRef();
-        let attr_val =
-            font_descriptor::CTFontDescriptorCopyAttribute(descriptor, kCTFontEnabledAttribute);
+fn is_enabled(fontdesc: &CTFontDescriptor) -> bool {
+    let Some(attr_val) = (unsafe { fontdesc.attribute(kCTFontEnabledAttribute) }) else {
+        return false;
+    };
 
-        if attr_val.is_null() {
-            return false;
-        }
+    let Ok(attr_val) = attr_val.downcast::<CFNumber>() else {
+        return false;
+    };
 
-        let attr_val = CFType::wrap_under_create_rule(attr_val);
-        let attr_val = CFNumber::wrap_under_get_rule(attr_val.as_CFTypeRef() as CFNumberRef);
-
-        attr_val.to_i32().unwrap_or(0) != 0
-    }
+    attr_val.as_i32().unwrap_or(0) != 0
 }
 
 /// Get descriptors for family name.
@@ -251,15 +249,37 @@ fn descriptors_for_family(family: &str) -> Vec<Descriptor> {
         create_for_family("Menlo").expect("Menlo exists")
     });
 
-    // CFArray of CTFontDescriptorRef (i think).
-    let descriptors = ct_collection.get_descriptors();
+    let descriptors = unsafe { ct_collection.matching_font_descriptors() };
     if let Some(descriptors) = descriptors {
-        for descriptor in descriptors.iter() {
-            out.push(Descriptor::new(descriptor.clone()));
+        // CFArray of CTFontDescriptorRef (i think).
+        let descriptors =
+            unsafe { CFRetained::cast_unchecked::<CFArray<CTFontDescriptor>>(descriptors) };
+
+        for descriptor in descriptors {
+            out.push(Descriptor::new(&descriptor));
         }
     }
 
     out
+}
+
+pub fn create_for_family(family: &str) -> Option<CFRetained<CTFontCollection>> {
+    let family_attr = unsafe { kCTFontFamilyNameAttribute };
+    let family_name = CFString::from_str(family);
+    let specified_attrs = CFDictionary::from_slices(&[family_attr], &[&*family_name]);
+
+    let wildcard_desc = unsafe { CTFontDescriptor::with_attributes(specified_attrs.as_opaque()) };
+    let ptr = [family_attr].as_ptr().cast_mut().cast::<*const c_void>();
+    let mandatory_attrs = unsafe { CFSet::new(None, ptr, 1, &kCFTypeSetCallBacks).unwrap() };
+    let matched_descs = unsafe {
+        CTFontDescriptor::matching_font_descriptors(&wildcard_desc, Some(&mandatory_attrs))
+    }?;
+    let key = unsafe { kCTFontCollectionRemoveDuplicatesOption };
+    let value = CFNumber::new_i64(1);
+    let options = CFDictionary::from_slices(&[key], &[&*value]);
+    Some(unsafe {
+        CTFontCollection::with_font_descriptors(Some(&matched_descs), Some(&options.as_opaque()))
+    })
 }
 
 // The AppleFontSmoothing user default controls font smoothing on macOS, which increases the stroke
@@ -307,7 +327,7 @@ static FONT_SMOOTHING_ENABLED: Lazy<bool> = Lazy::new(|| {
 /// A font.
 #[derive(Clone)]
 struct Font {
-    ct_font: CTFont,
+    ct_font: CFRetained<CTFont>,
     fallbacks: Vec<Font>,
 }
 
@@ -317,15 +337,15 @@ impl Font {
     fn metrics(&self) -> Metrics {
         let average_advance = self.glyph_advance('0');
 
-        let ascent = self.ct_font.ascent().round();
-        let descent = self.ct_font.descent().round();
-        let leading = self.ct_font.leading().round();
+        let ascent = unsafe { self.ct_font.ascent() }.round();
+        let descent = unsafe { self.ct_font.descent() }.round();
+        let leading = unsafe { self.ct_font.leading() }.round();
         let line_height = ascent + descent + leading;
 
         // Strikeout and underline metrics.
         // CoreText doesn't provide strikeout so we provide our own.
-        let underline_position = self.ct_font.underline_position() as f32;
-        let underline_thickness = self.ct_font.underline_thickness() as f32;
+        let underline_position = unsafe { self.ct_font.underline_position() } as f32;
+        let underline_thickness = unsafe { self.ct_font.underline_thickness() } as f32;
         let strikeout_position = (line_height / 2. - descent) as f32;
         let strikeout_thickness = underline_thickness;
 
@@ -341,15 +361,15 @@ impl Font {
     }
 
     fn is_bold(&self) -> bool {
-        self.ct_font.symbolic_traits().is_bold()
+        unsafe { self.ct_font.symbolic_traits() }.contains(CTFontSymbolicTraits::BoldTrait)
     }
 
     fn is_italic(&self) -> bool {
-        self.ct_font.symbolic_traits().is_italic()
+        unsafe { self.ct_font.symbolic_traits() }.contains(CTFontSymbolicTraits::ItalicTrait)
     }
 
     fn is_colored(&self) -> bool {
-        (self.ct_font.symbolic_traits() & kCTFontColorGlyphsTrait) != 0
+        unsafe { self.ct_font.symbolic_traits() }.contains(CTFontSymbolicTraits::ColorGlyphsTrait)
     }
 
     fn glyph_advance(&self, character: char) -> f64 {
@@ -358,9 +378,9 @@ impl Font {
         let indices = [index as CGGlyph];
 
         unsafe {
-            self.ct_font.get_advances_for_glyphs(
-                kCTFontDefaultOrientation,
-                &indices[0],
+            self.ct_font.advances_for_glyphs(
+                CTFontOrientation::Default,
+                NonNull::from(&indices[0]),
                 ptr::null_mut(),
                 1,
             )
@@ -368,9 +388,15 @@ impl Font {
     }
 
     fn get_glyph(&self, character: char, glyph_index: u32) -> RasterizedGlyph {
-        let bounds = self
-            .ct_font
-            .get_bounding_rects_for_glyphs(kCTFontDefaultOrientation, &[glyph_index as CGGlyph]);
+        let glyphs = [glyph_index as CGGlyph];
+        let bounds = unsafe {
+            self.ct_font.bounding_rects_for_glyphs(
+                CTFontOrientation::Default,
+                NonNull::from(&glyphs[0]),
+                ptr::null_mut(),
+                1,
+            )
+        };
 
         let rasterized_left = bounds.origin.x.floor() as i32;
         let rasterized_width =
@@ -391,50 +417,65 @@ impl Font {
             };
         }
 
-        let mut cg_context = CGContext::create_bitmap_context(
-            None,
-            rasterized_width as usize,
-            rasterized_height as usize,
-            8, // bits per component
-            rasterized_width as usize * 4,
-            &CGColorSpace::create_device_rgb(),
-            kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
-        );
+        let cg_context = unsafe {
+            CGBitmapContextCreate(
+                ptr::null_mut(),
+                rasterized_width as usize,
+                rasterized_height as usize,
+                8, // bits per component
+                rasterized_width as usize * 4,
+                CGColorSpace::new_device_rgb().as_deref(),
+                CGImageAlphaInfo::PremultipliedFirst.0 | CGBitmapInfo::ByteOrder32Host.0,
+            )
+        }
+        .unwrap();
 
         let is_colored = self.is_colored();
 
         // Set background color for graphics context.
         let bg_a = if is_colored { 0.0 } else { 1.0 };
-        cg_context.set_rgb_fill_color(0.0, 0.0, 0.0, bg_a);
+        unsafe { CGContext::set_rgb_fill_color(Some(&cg_context), 0.0, 0.0, 0.0, bg_a) };
 
         let context_rect = CGRect::new(
-            &CGPoint::new(0.0, 0.0),
-            &CGSize::new(f64::from(rasterized_width), f64::from(rasterized_height)),
+            CGPoint::new(0.0, 0.0),
+            CGSize::new(f64::from(rasterized_width), f64::from(rasterized_height)),
         );
 
-        cg_context.fill_rect(context_rect);
+        unsafe { CGContext::fill_rect(Some(&cg_context), context_rect) };
 
-        cg_context.set_allows_font_smoothing(true);
-        cg_context.set_should_smooth_fonts(*FONT_SMOOTHING_ENABLED);
-        cg_context.set_allows_font_subpixel_quantization(true);
-        cg_context.set_should_subpixel_quantize_fonts(true);
-        cg_context.set_allows_font_subpixel_positioning(true);
-        cg_context.set_should_subpixel_position_fonts(true);
-        cg_context.set_allows_antialiasing(true);
-        cg_context.set_should_antialias(true);
+        unsafe {
+            CGContext::set_allows_font_smoothing(Some(&cg_context), true);
+            CGContext::set_should_smooth_fonts(Some(&cg_context), *FONT_SMOOTHING_ENABLED);
+            CGContext::set_allows_font_subpixel_quantization(Some(&cg_context), true);
+            CGContext::set_should_subpixel_quantize_fonts(Some(&cg_context), true);
+            CGContext::set_allows_font_subpixel_positioning(Some(&cg_context), true);
+            CGContext::set_should_subpixel_position_fonts(Some(&cg_context), true);
+            CGContext::set_allows_antialiasing(Some(&cg_context), true);
+            CGContext::set_should_antialias(Some(&cg_context), true);
+        }
 
         // Set fill color to white for drawing the glyph.
-        cg_context.set_rgb_fill_color(1.0, 1.0, 1.0, 1.0);
+        unsafe { CGContext::set_rgb_fill_color(Some(&cg_context), 1.0, 1.0, 1.0, 1.0) };
         let rasterization_origin =
             CGPoint { x: f64::from(-rasterized_left), y: f64::from(rasterized_descent) };
 
-        self.ct_font.draw_glyphs(
-            &[glyph_index as CGGlyph],
-            &[rasterization_origin],
-            cg_context.clone(),
-        );
+        unsafe {
+            self.ct_font.draw_glyphs(
+                NonNull::from(&[glyph_index as CGGlyph][0]),
+                NonNull::from(&[rasterization_origin][0]),
+                1,
+                &cg_context,
+            )
+        };
 
-        let rasterized_pixels = cg_context.data().to_vec();
+        let rasterized_pixels = unsafe {
+            slice::from_raw_parts_mut(
+                CGBitmapContextGetData(Some(&cg_context)) as *mut u8,
+                CGBitmapContextGetHeight(Some(&cg_context))
+                    * CGBitmapContextGetBytesPerRow(Some(&cg_context)),
+            )
+        };
+        let rasterized_pixels = rasterized_pixels.to_vec();
 
         let buffer = if is_colored {
             BitmapBuffer::Rgba(byte_order::extract_rgba(&rasterized_pixels))
@@ -468,9 +509,9 @@ impl Font {
         let mut glyphs: [CGGlyph; 2] = [0; 2];
 
         let res = unsafe {
-            self.ct_font.get_glyphs_for_characters(
-                encoded.as_ptr(),
-                glyphs.as_mut_ptr(),
+            self.ct_font.glyphs_for_characters(
+                NonNull::new(encoded.as_ptr().cast_mut()).unwrap(),
+                NonNull::new(glyphs.as_mut_ptr()).unwrap(),
                 encoded.len() as CFIndex,
             )
         };

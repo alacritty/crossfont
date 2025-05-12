@@ -27,10 +27,6 @@ foreign-types = "0.5"
 pkg-config = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-core-foundation = "0.10.0"
-core-text = "21.0.0"
-core-graphics = "0.24.0"
-core-foundation-sys = "0.8.4"
 once_cell = "1.12"
 objc2 = "0.6.1"
 objc2-foundation = { version = "0.3.1", default-features = false, features = [
@@ -38,6 +34,33 @@ objc2-foundation = { version = "0.3.1", default-features = false, features = [
     "NSString",
     "NSUserDefaults",
     "NSValue",
+] }
+objc2-core-foundation = { version = "0.3.1", default-features = false, features = [
+    "std",
+    "CFArray",
+    "CFBase",
+    "CFCGTypes",
+    "CFDictionary",
+    "CFNumber",
+    "CFSet",
+    "CFString",
+    "CFURL",
+] }
+objc2-core-text = { version = "0.3.1", default-features = false, features = [
+    "std",
+    "objc2-core-graphics",
+    "CTFont",
+    "CTFontCollection",
+    "CTFontDescriptor",
+    "CTFontTraits",
+] }
+objc2-core-graphics = { version = "0.3.1", default-features = false, features = [
+    "std",
+    "CGBitmapContext",
+    "CGColorSpace",
+    "CGContext",
+    "CGFont",
+    "CGImage",
 ] }
 
 [target.'cfg(windows)'.dependencies]
