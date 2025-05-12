@@ -2,6 +2,7 @@
 
 use std::cmp::{min, Ordering};
 use std::collections::HashMap;
+use std::ffi::{c_long, c_uint};
 use std::fmt::{self, Formatter};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -10,7 +11,6 @@ use freetype::face::LoadFlag;
 use freetype::tt_os2::TrueTypeOS2Table;
 use freetype::{self, Library, Matrix};
 use freetype::{freetype_sys, Face as FtFace};
-use libc::{c_long, c_uint};
 use log::{debug, trace};
 
 pub mod fc;
@@ -71,15 +71,18 @@ impl fmt::Debug for FaceLoadingProperties {
         f.debug_struct("Face")
             .field("ft_face", &self.ft_face)
             .field("load_flags", &self.load_flags)
-            .field("render_mode", &match self.render_mode {
-                freetype::RenderMode::Normal => "Normal",
-                freetype::RenderMode::Light => "Light",
-                freetype::RenderMode::Mono => "Mono",
-                freetype::RenderMode::Lcd => "Lcd",
-                freetype::RenderMode::LcdV => "LcdV",
-                freetype::RenderMode::Max => "Max",
-                freetype::RenderMode::Sdf => "Sdf",
-            })
+            .field(
+                "render_mode",
+                &match self.render_mode {
+                    freetype::RenderMode::Normal => "Normal",
+                    freetype::RenderMode::Light => "Light",
+                    freetype::RenderMode::Mono => "Mono",
+                    freetype::RenderMode::Lcd => "Lcd",
+                    freetype::RenderMode::LcdV => "LcdV",
+                    freetype::RenderMode::Max => "Max",
+                    freetype::RenderMode::Sdf => "Sdf",
+                },
+            )
             .field("lcd_filter", &self.lcd_filter)
             .finish()
     }
