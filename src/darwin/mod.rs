@@ -24,8 +24,8 @@ use core_text::font_descriptor::{
     self, kCTFontColorGlyphsTrait, kCTFontDefaultOrientation, kCTFontEnabledAttribute,
     CTFontDescriptor, SymbolicTraitAccessors,
 };
-use objc2::rc::{autoreleasepool, Retained};
-use objc2_foundation::{ns_string, NSNumber, NSObject, NSObjectProtocol, NSString, NSUserDefaults};
+use objc2::rc::autoreleasepool;
+use objc2_foundation::{ns_string, NSNumber, NSUserDefaults};
 
 use log::{trace, warn};
 use once_cell::sync::Lazy;
@@ -280,14 +280,7 @@ static FONT_SMOOTHING_ENABLED: Lazy<bool> = Lazy::new(|| {
             None => return true,
         };
 
-        // SAFETY: The values in `NSUserDefaults` are always subclasses of
-        // `NSObject`.
-        let value: Retained<NSObject> = unsafe { Retained::cast(value) };
-
-        if value.is_kind_of::<NSNumber>() {
-            // SAFETY: Just checked that the value is a NSNumber
-            let value: Retained<NSNumber> = unsafe { Retained::cast(value) };
-
+        if let Some(value) = value.downcast_ref::<NSNumber>() {
             // NSNumber's objCType method returns one of these strings depending on the size:
             // q = quad (long long), l = long, i = int, s = short.
             // This is done to reject booleans, which are NSNumbers with an objCType of "c", but
@@ -302,10 +295,8 @@ static FONT_SMOOTHING_ENABLED: Lazy<bool> = Lazy::new(|| {
 
             let smoothing = value.integerValue();
             smoothing != 0
-        } else if value.is_kind_of::<NSString>() {
-            // SAFETY: Just checked that the value is a NSString
-            let value: Retained<NSString> = unsafe { Retained::cast(value) };
-            let smoothing = unsafe { value.integerValue() };
+        } else if let Ok(value) = value.downcast::<NSNumber>() {
+            let smoothing = value.integerValue();
             smoothing != 0
         } else {
             true
