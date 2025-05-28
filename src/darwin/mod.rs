@@ -63,7 +63,7 @@ impl Descriptor {
     }
 
     /// Create a Font from this descriptor.
-    fn to_font(&self, size: f64, load_fallbacks: bool) -> Font {
+    fn to_font(&self, size: f64, load_fallbacks: bool, fallback_fonts: &Vec<String>) -> Font {
         let ct_font = ct_new_from_descriptor(&self.ct_descriptor, size);
 
         let fallbacks = if load_fallbacks {
@@ -71,7 +71,7 @@ impl Descriptor {
             let mut fallbacks = cascade_list_for_languages(&ct_font, &["en".to_owned()])
                 .into_iter()
                 .filter(|desc| !desc.font_path.as_os_str().is_empty())
-                .map(|desc| desc.to_font(size, false))
+                .map(|desc| desc.to_font(size, false, fallback_fonts))
                 .collect::<Vec<_>>();
 
             // TODO, we can't use apple's proposed
@@ -83,6 +83,12 @@ impl Descriptor {
             if let Ok(apple_symbols) = new_from_name("Apple Symbols", size) {
                 fallbacks.push(Font { ct_font: apple_symbols, fallbacks: Vec::new() })
             };
+
+            for fallback_font in fallback_fonts {
+                if let Ok(fb_font) = new_from_name(fallback_font, size) {
+                    fallbacks.push(Font { ct_font: fb_font, fallbacks: Vec::new() })
+                }
+            }
 
             fallbacks
         } else {
@@ -166,7 +172,7 @@ impl CoreTextRasterizer {
             if descriptor.style_name == style {
                 // Found the font we want.
                 let size = f64::from(size.as_pt());
-                let font = descriptor.to_font(size, true);
+                let font = descriptor.to_font(size, true, &desc.fallbacks);
                 return Ok(font);
             }
         }
@@ -187,7 +193,7 @@ impl CoreTextRasterizer {
 
         let descriptors = descriptors_for_family(&desc.name[..]);
         for descriptor in descriptors {
-            let font = descriptor.to_font(size, true);
+            let font = descriptor.to_font(size, true, &desc.fallbacks);
             if font.is_bold() == bold && font.is_italic() == italic {
                 // Found the font we want.
                 return Ok(font);
@@ -503,7 +509,7 @@ mod tests {
         println!("{:?}", list);
 
         // Check to_font.
-        let fonts = list.iter().map(|desc| desc.to_font(72., false)).collect::<Vec<_>>();
+        let fonts = list.iter().map(|desc| desc.to_font(72., false, &vec![])).collect::<Vec<_>>();
 
         for font in fonts {
             // Get a glyph.

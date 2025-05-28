@@ -33,6 +33,7 @@ const MAX_FONT_PT_SIZE: f32 = 3999.;
 pub struct FontDesc {
     name: String,
     style: Style,
+    fallbacks: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -67,11 +68,11 @@ impl fmt::Display for Style {
 }
 
 impl FontDesc {
-    pub fn new<S>(name: S, style: Style) -> FontDesc
+    pub fn new<S>(name: S, style: Style, fallbacks: Vec<String>) -> FontDesc
     where
         S: Into<String>,
     {
-        FontDesc { name: name.into(), style }
+        FontDesc { name: name.into(), style, fallbacks }
     }
 }
 
