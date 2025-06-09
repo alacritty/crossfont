@@ -1,6 +1,6 @@
 [package]
 name = "crossfont"
-version = "0.8.0"
+version = "0.8.1"
 description = "Cross platform native font loading and rasterization"
 authors = ["Christian Duerr <contact@christianduerr.com>", "Joe Wilm <joe@jwilm.com>"]
 repository = "https://github.com/alacritty/crossfont.git"
