@@ -1,15 +1,5 @@
 //! Constants for bitmap byte order.
 
-#![allow(non_upper_case_globals)]
-pub const kCGBitmapByteOrder32Little: u32 = 2 << 12;
-pub const kCGBitmapByteOrder32Big: u32 = 4 << 12;
-
-#[cfg(target_endian = "little")]
-pub const kCGBitmapByteOrder32Host: u32 = kCGBitmapByteOrder32Little;
-
-#[cfg(target_endian = "big")]
-pub const kCGBitmapByteOrder32Host: u32 = kCGBitmapByteOrder32Big;
-
 #[cfg(target_endian = "little")]
 pub fn extract_rgba(bytes: &[u8]) -> Vec<u8> {
     let pixels = bytes.len() / 4;
