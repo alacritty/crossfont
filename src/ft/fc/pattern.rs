@@ -604,7 +604,7 @@ impl PatternRef {
         }
     }
 
-    pub fn strong_count(&self) -> Pattern {
+    pub fn upgrade(&self) -> Pattern {
         unsafe { FcPatternReference(self.as_ptr()) }
         unsafe { Pattern(NonNull::new_unchecked(self.as_ptr())) }
     }

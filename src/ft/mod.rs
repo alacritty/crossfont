@@ -397,10 +397,10 @@ impl FreeTypeRasterizer {
                 // Exclude fonts that don't contribute to the coverage, since those won't
                 // be picked up ever.
                 //
-                // We could have done that with `font_sort`, but given that we must filter
-                // specific fonts, we do it that way.
+                // We can not do this with `font_sort` since we're manually filtering out colored
+                // outline fonts.
                 if coverage.merge(charset) {
-                    let pattern = fallback_font.strong_count();
+                    let pattern = fallback_font.upgrade();
                     Some(FallbackFont::Ref { pattern, hash })
                 } else {
                     None
@@ -450,7 +450,7 @@ impl FreeTypeRasterizer {
         for fallback_font in &mut fallback_list.list {
             if let FallbackFont::Ref { pattern, hash } = fallback_font {
                 // Don't try to build font if it doesn't have character we need.
-                if !pattern.get_charset().expect("not filtred font").has_char(glyph.character) {
+                if !pattern.get_charset().unwrap().has_char(glyph.character) {
                     continue;
                 }
 
