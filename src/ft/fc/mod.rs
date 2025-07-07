@@ -60,7 +60,7 @@ pub fn font_sort(config: &ConfigRef, pattern: &PatternRef) -> Option<FontSet> {
         FcFontSort(
             config.as_ptr(),
             pattern.as_ptr(),
-            1, // Trim font list.
+            0, // Don't trim font list to later exclude fonts we can not render.
             ptr::null_mut(),
             &mut result,
         )

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::ptr::{self, NonNull};
 use std::str;
 
+use fontconfig_sys::FcPatternReference;
 use foreign_types::{foreign_type, ForeignType, ForeignTypeRef};
 use libc::{c_char, c_double, c_int};
 
@@ -410,6 +411,7 @@ impl PatternRef {
         scalable() => b"scalable\0",
         symbol() => b"symbol\0",
         color() => b"color\0",
+        outline() => b"outline\0",
         minspace() => b"minspace\0",
         embolden() => b"embolden\0",
         embeddedbitmap() => b"embeddedbitmap\0",
@@ -600,5 +602,10 @@ impl PatternRef {
         unsafe {
             FcDefaultSubstitute(self.as_ptr());
         }
+    }
+
+    pub fn strong_count(&self) -> Pattern {
+        unsafe { FcPatternReference(self.as_ptr()) }
+        unsafe { Pattern(NonNull::new_unchecked(self.as_ptr())) }
     }
 }

@@ -29,15 +29,9 @@ const MISSING_GLYPH_INDEX: u32 = 0;
 /// Delay before font config reload after creating the `Rasterizer`.
 const RELOAD_DELAY: Duration = Duration::from_secs(2);
 
-struct FallbackFont {
-    pattern: Pattern,
-    key: FontKey,
-}
-
-impl FallbackFont {
-    fn new(pattern: Pattern, key: FontKey) -> FallbackFont {
-        Self { pattern, key }
-    }
+enum FallbackFont {
+    Ref { pattern: Pattern, hash: PatternHash },
+    Rendered { pattern: Pattern, key: FontKey },
 }
 
 impl FontKey {
@@ -49,6 +43,7 @@ impl FontKey {
 
 #[derive(Default)]
 struct FallbackList {
+    requested_pattern: Pattern,
     list: Vec<FallbackFont>,
     coverage: CharSet,
 }
@@ -389,23 +384,35 @@ impl FreeTypeRasterizer {
 
         // Coverage for fallback fonts.
         let coverage = CharSet::new();
-        let empty_charset = CharSet::new();
-
         let list: Vec<FallbackFont> = matched_fonts
-            .map(|fallback_font| {
-                let charset = fallback_font.get_charset().unwrap_or(&empty_charset);
+            .filter_map(|fallback_font| {
+                // Ignore colored outline fonts, since we can not render them.
+                let color = fallback_font.color().next().unwrap_or_default();
+                let outline = fallback_font.outline().next().unwrap_or_default();
+                if color && outline {
+                    return None;
+                }
 
-                // Use original pattern to preserve loading flags.
-                let fallback_font = pattern.render_prepare(config, fallback_font);
-                let fallback_font_key = FontKey::from_pattern_hashes(hash, fallback_font.hash());
-
-                coverage.merge(charset);
-
-                FallbackFont::new(fallback_font, fallback_font_key)
+                let charset = fallback_font.get_charset()?;
+                // Exclude fonts that don't contribute to the coverage, since those won't
+                // be picked up ever.
+                //
+                // We could have done that with `font_sort`, but given that we must filter
+                // specific fonts, we do it that way.
+                if coverage.merge(charset) {
+                    let pattern = fallback_font.strong_count();
+                    Some(FallbackFont::Ref { pattern, hash })
+                } else {
+                    None
+                }
             })
             .collect();
 
-        self.fallback_lists.insert(primary_font_key, FallbackList { list, coverage });
+        self.fallback_lists.insert(primary_font_key, FallbackList {
+            requested_pattern: pattern,
+            list,
+            coverage,
+        });
 
         Ok(primary_font_key)
     }
@@ -433,16 +440,31 @@ impl FreeTypeRasterizer {
     }
 
     fn load_face_with_glyph(&mut self, glyph: GlyphKey) -> Result<FontKey, Error> {
-        let fallback_list = self.fallback_lists.get(&glyph.font_key).unwrap();
+        let fallback_list = self.fallback_lists.get_mut(&glyph.font_key).unwrap();
 
         // Check whether glyph is presented in any fallback font.
         if !fallback_list.coverage.has_char(glyph.character) {
             return Ok(glyph.font_key);
         }
 
-        for fallback_font in &fallback_list.list {
-            let font_key = fallback_font.key;
-            let font_pattern = &fallback_font.pattern;
+        for fallback_font in &mut fallback_list.list {
+            if let FallbackFont::Ref { pattern, hash } = fallback_font {
+                // Don't try to build font if it doesn't have character we need.
+                if !pattern.get_charset().expect("not filtred font").has_char(glyph.character) {
+                    continue;
+                }
+
+                let config = fc::Config::get_current();
+                let pattern = fallback_list.requested_pattern.render_prepare(config, pattern);
+                let key = FontKey::from_pattern_hashes(*hash, pattern.hash());
+                *fallback_font = FallbackFont::Rendered { pattern, key };
+            }
+
+            let (font_pattern, font_key) = match fallback_font {
+                FallbackFont::Rendered { pattern, key } => (pattern, *key),
+                FallbackFont::Ref { .. } => unreachable!("loaded above"),
+            };
+
             match self.loader.faces.get(&font_key) {
                 Some(face) => {
                     // We found something in a current face, so let's use it.
@@ -568,7 +590,7 @@ impl FreeTypeRasterizer {
                 }
                 Ok((bitmap.rows(), bitmap.width(), BitmapBuffer::Rgba(packed)))
             },
-            mode => panic!("unhandled pixel mode: {:?}", mode),
+            mode => panic!("unhandled pixel mode: {mode:?}"),
         }
     }
 }
@@ -733,7 +755,7 @@ impl FreeTypeLoader {
                 rgba,
             };
 
-            debug!("Loaded Face {:?}", face);
+            debug!("Loaded Face {face:?}");
 
             self.faces.insert(font_key, face);
 

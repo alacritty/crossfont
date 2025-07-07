@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+- Ignore colored SVG fonts in fontconfig backend
+
 ## 0.9.0
 
 ### Changed
