@@ -49,7 +49,7 @@ impl<'a> IntoIterator for &'a FontSet {
     fn into_iter(self) -> Iter<'a> {
         let num_fonts = unsafe { (*self.as_ptr()).nfont as isize };
 
-        trace!("Number of fonts is {}", num_fonts);
+        trace!("Number of fonts is {num_fonts}");
 
         Iter { font_set: self.deref(), num_fonts: num_fonts as _, current: 0 }
     }
@@ -62,7 +62,7 @@ impl<'a> IntoIterator for &'a FontSetRef {
     fn into_iter(self) -> Iter<'a> {
         let num_fonts = unsafe { (*self.as_ptr()).nfont as isize };
 
-        trace!("Number of fonts is {}", num_fonts);
+        trace!("Number of fonts is {num_fonts}");
 
         Iter { font_set: self, num_fonts: num_fonts as _, current: 0 }
     }
