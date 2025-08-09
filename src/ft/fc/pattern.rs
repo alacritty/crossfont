@@ -1,4 +1,4 @@
-use std::ffi::{CStr, CString};
+use std::ffi::{c_char, c_double, c_int, CStr, CString};
 use std::fmt;
 use std::path::PathBuf;
 use std::ptr::{self, NonNull};
@@ -6,7 +6,6 @@ use std::str;
 
 use fontconfig_sys::FcPatternReference;
 use foreign_types::{foreign_type, ForeignType, ForeignTypeRef};
-use libc::{c_char, c_double, c_int};
 
 use super::ffi::FcMatrix;
 use super::ffi::FcResultMatch;

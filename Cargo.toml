@@ -2,7 +2,10 @@
 name = "crossfont"
 version = "0.9.0"
 description = "Cross platform native font loading and rasterization"
-authors = ["Christian Duerr <contact@christianduerr.com>", "Joe Wilm <joe@jwilm.com>"]
+authors = [
+    "Christian Duerr <contact@christianduerr.com>",
+    "Joe Wilm <joe@jwilm.com>",
+]
 repository = "https://github.com/alacritty/crossfont.git"
 documentation = "https://docs.rs/crossfont"
 license = "Apache-2.0"
@@ -13,28 +16,51 @@ edition = "2021"
 rust-version = "1.77.0"
 
 [dependencies]
-libc = "0.2"
-foreign-types = "0.5"
 log = "0.4"
 
 [target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
 yeslogic-fontconfig-sys = "6.0.0"
 freetype-rs = "0.36.0"
+foreign-types = "0.5"
 
 [target.'cfg(not(any(target_os = "macos", windows)))'.build-dependencies]
 pkg-config = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-core-foundation = "0.10.0"
-core-text = "21.0.0"
-core-graphics = "0.24.0"
-core-foundation-sys = "0.8.4"
 once_cell = "1.12"
-objc2 = "0.5.1"
-objc2-foundation = { version = "0.2.2", features = [
+objc2 = "0.6.1"
+objc2-foundation = { version = "0.3.1", default-features = false, features = [
+    "std",
     "NSString",
     "NSUserDefaults",
     "NSValue",
+] }
+objc2-core-foundation = { version = "0.3.1", default-features = false, features = [
+    "std",
+    "CFArray",
+    "CFBase",
+    "CFCGTypes",
+    "CFDictionary",
+    "CFNumber",
+    "CFSet",
+    "CFString",
+    "CFURL",
+] }
+objc2-core-text = { version = "0.3.1", default-features = false, features = [
+    "std",
+    "objc2-core-graphics",
+    "CTFont",
+    "CTFontCollection",
+    "CTFontDescriptor",
+    "CTFontTraits",
+] }
+objc2-core-graphics = { version = "0.3.1", default-features = false, features = [
+    "std",
+    "CGBitmapContext",
+    "CGColorSpace",
+    "CGContext",
+    "CGFont",
+    "CGImage",
 ] }
 
 [target.'cfg(windows)'.dependencies]
