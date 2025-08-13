@@ -60,7 +60,7 @@ impl fmt::Display for Style {
         match *self {
             Style::Specific(ref s) => f.write_str(s),
             Style::Description { slant, weight } => {
-                write!(f, "slant={:?}, weight={:?}", slant, weight)
+                write!(f, "slant={slant:?}, weight={weight:?}")
             },
         }
     }
@@ -223,13 +223,13 @@ impl std::error::Error for Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Error::FontNotFound(font) => write!(f, "font {:?} not found", font),
+            Error::FontNotFound(font) => write!(f, "font {font:?} not found"),
             Error::MissingGlyph(glyph) => {
                 write!(f, "glyph for character {:?} not found", glyph.character)
             },
             Error::UnknownFontKey => f.write_str("invalid font key"),
             Error::MetricsNotFound => f.write_str("metrics not found"),
-            Error::PlatformError(err) => write!(f, "{}", err),
+            Error::PlatformError(err) => write!(f, "{err}"),
         }
     }
 }

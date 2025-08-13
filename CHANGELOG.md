@@ -8,10 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+- Ignore colored SVG fonts in fontconfig backend
+
+## 0.9.0
+
 ### Changed
 
 - MSRV changed to 1.77.0
 - **Breaking** yeslogic-fontconfig-sys bumped to 6.0.0
+
+## 0.8.1
+
+### Changed
+
+- MSRV changed to 1.71.0
+- Fixed leak after searching a font with fontconfig backend
 
 ## 0.8.0
 

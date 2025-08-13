@@ -55,11 +55,12 @@ impl CharSetRef {
         }
     }
 
-    pub fn merge(&self, other: &CharSetRef) {
+    pub fn merge(&self, other: &CharSetRef) -> bool {
         unsafe {
             // Value is just an indicator whether something was added or not.
             let mut value: FcBool = 0;
             FcCharSetMerge(self.as_ptr() as _, other.as_ptr() as _, &mut value);
+            value != 0
         }
     }
 }
