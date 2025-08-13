@@ -90,6 +90,7 @@ impl DirectWriteRasterizer {
             top: -bounds.top,
             left: bounds.left,
             advance: (0, 0),
+            secondary: false,
             buffer,
         })
     }
